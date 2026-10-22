@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isRoot
@@ -87,7 +88,7 @@ class IncidentRegressionTest {
         compose.waitUntil(5_000) {
             compose.onAllNodes(androidx.compose.ui.test.hasText("部分提交，需要跟进")).fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithText("部分提交，需要跟进").assertIsDisplayed()
+        compose.onNode(hasText("部分提交，需要跟进") and hasAnyAncestor(isRoot() and hasAnyDescendant(hasText("事故与短信回执")))).assertIsDisplayed()
         compose.onNodeWithText("完成").performClick()
     }
 
