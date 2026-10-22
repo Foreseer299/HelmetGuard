@@ -77,7 +77,8 @@ fun HomeScreen(
     val detector by graph.runtime.detector.collectAsState()
     val emergency by graph.incidents.state.collectAsState()
     val monitoring by graph.preferences.monitoringEnabled.collectAsState(initial = false)
-    val contacts by graph.database.contacts().observeAll().collectAsState(initial = emptyList())
+    val contactsFlow = remember(graph) { graph.database.contacts().observeAll() }
+    val contacts by contactsFlow.collectAsState(initial = emptyList())
     val recording by graph.recorder.state.collectAsState()
     val selectedSim by graph.preferences.smsSubscriptionId.collectAsState(initial = -1)
     val oemConfirmed by graph.preferences.oemSetupConfirmed.collectAsState(initial = false)

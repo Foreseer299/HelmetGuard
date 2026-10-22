@@ -1,6 +1,8 @@
 package com.helmet.guard
 
 import android.graphics.Bitmap
+import androidx.compose.material3.Surface
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -19,7 +21,9 @@ class UiPreviewTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         compose.setContent {
             HelmetGuardTheme(darkTheme = dark) {
-                HomeScreen(context.appGraph, { _ -> }, {}, {}, {}, {}, { _, _ -> })
+                Surface(color = MaterialTheme.colorScheme.background) {
+                    HomeScreen(context.appGraph, { _ -> }, {}, {}, {}, {}, { _, _ -> })
+                }
             }
         }
         compose.waitForIdle()

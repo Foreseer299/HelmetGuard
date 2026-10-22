@@ -16,6 +16,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.platform.app.InstrumentationRegistry
 import com.helmet.guard.data.db.AccidentEntity
+import com.helmet.guard.data.db.SmsPartEntity
 import com.helmet.guard.domain.DetectionFeatures
 import com.helmet.guard.domain.EmergencyStage
 import com.helmet.guard.domain.HardwareIncidentIdentity
@@ -141,6 +142,22 @@ class IncidentRegressionTest {
         }
         compose.onNodeWithText("我安全，取消报警").performClick()
         awaitCondition { graph.incidents.state.value.stage == EmergencyStage.CANCELLED }
+    }
+
+    @Test fun interruptedSendingUsesPersistedReceiptsAndPreservesPartialFailure() = runBlocking<Unit> {
+        val now = System.currentTimeMillis()
+        graph.database.accidents().upsert(AccidentEntity(
+            301, now, now, "MANUAL", "SENDING", 1f,
+            0f, 0f, 0f, 0, now, null, null, null, null, null, "中断发送", false
+        ))
+        graph.database.smsParts().upsert(SmsPartEntity(301, 1, "演示甲", "***", 0, 1, "SENT", "SUBMITTED", -1, "已提交", now))
+        graph.database.smsParts().upsert(SmsPartEntity(301, 2, "演示乙", "***", 0, 1, "SENT", "FAILED", 1, "失败", now))
+        val restored = coordinator()
+        restored.restorePending()
+        awaitCondition { restored.state.value.stage == EmergencyStage.PARTIAL_SUCCESS }
+        restored.cancel(301)
+        assertEquals("PARTIAL_SUCCESS", graph.database.accidents().byId(301)!!.stage)
+        assertEquals(2, graph.database.smsParts().forEvent(301).size)
     }
 
     @Test fun simulatedSendingRecoveryNeverCallsRealLocationOrSms() = runBlocking<Unit> {

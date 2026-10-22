@@ -52,7 +52,8 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun ContactsScreen(graph: AppGraph, back: () -> Unit) {
-    val contacts by graph.database.contacts().observeAll().collectAsState(initial = emptyList())
+    val contactsFlow = remember(graph) { graph.database.contacts().observeAll() }
+    val contacts by contactsFlow.collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
     var editing by remember { mutableStateOf<EmergencyContactEntity?>(null) }
     var showEditor by remember { mutableStateOf(false) }

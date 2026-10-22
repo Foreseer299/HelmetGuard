@@ -68,71 +68,71 @@ class IncidentCoordinator(
         scope.launch {
             var attemptedEventId: Long? = null
             try {
-            mutex.withLock {
-                val candidate = incoming.copy(eventId = maxOf(System.currentTimeMillis(), (database.accidents().maxEventId() ?: 0L) + 1))
-                val hardware = candidate.hardware
-                if (hardware != null) {
-                    val existing = database.accidents().byHardwareId(hardware.deviceId, hardware.eventId)
-                    if (existing != null) {
-                        acknowledgeHardware(hardware)
-                        if (existing.stage == EmergencyStage.CANCELLED.name) cancelHardware(hardware)
-                        return@withLock
-                    }
-                }
-                val current = _state.value
-                if (current.stage in ACTIVE_STAGES) {
-                    if (current.isSimulation && !candidate.isSimulation) {
-                        activeJob?.cancelAndJoin()
-                        current.eventId?.let { database.accidents().updateStage(it, EmergencyStage.CANCELLED.name, "真实事件到达，演练已停止") }
-                        releaseWakeLock()
-                    } else {
-                        // A hardware confirmation may belong to an already active phone detection.
-                        // Persist its original wire identity before stopping firmware retransmission.
-                        if (hardware != null && !current.isSimulation && current.eventId != null) {
-                            val active = database.accidents().byId(current.eventId)
-                            if (active != null && active.hardwareEventId == null) {
-                                database.accidents().attachHardware(active.eventId, hardware.deviceId, hardware.eventId, hardware.address)
-                                acknowledgeHardware(hardware)
-                            }
+                mutex.withLock {
+                    val candidate = incoming.copy(eventId = maxOf(System.currentTimeMillis(), (database.accidents().maxEventId() ?: 0L) + 1))
+                    val hardware = candidate.hardware
+                    if (hardware != null) {
+                        val existing = database.accidents().byHardwareId(hardware.deviceId, hardware.eventId)
+                        if (existing != null) {
+                            acknowledgeHardware(hardware)
+                            if (existing.stage == EmergencyStage.CANCELLED.name) cancelHardware(hardware)
+                            return@withLock
                         }
-                        return@withLock
                     }
+                    val current = _state.value
+                    if (current.stage in ACTIVE_STAGES) {
+                        if (current.isSimulation && !candidate.isSimulation) {
+                            activeJob?.cancelAndJoin()
+                            current.eventId?.let { database.accidents().updateStage(it, EmergencyStage.CANCELLED.name, "真实事件到达，演练已停止") }
+                            releaseWakeLock()
+                        } else {
+                            // A hardware confirmation may belong to an already active phone detection.
+                            // Persist its original wire identity before stopping firmware retransmission.
+                            if (hardware != null && !current.isSimulation && current.eventId != null) {
+                                val active = database.accidents().byId(current.eventId)
+                                if (active != null && active.hardwareEventId == null) {
+                                    database.accidents().attachHardware(active.eventId, hardware.deviceId, hardware.eventId, hardware.address)
+                                    acknowledgeHardware(hardware)
+                                }
+                            }
+                            return@withLock
+                        }
+                    }
+                    attemptedEventId = candidate.eventId
+                    val countdown = (countdownSeconds ?: preferences.countdownSeconds.first()).coerceIn(5, 30)
+                    val deadline = System.currentTimeMillis() + countdown * 1_000L
+                    val initialStage = EmergencyStage.COUNTDOWN
+                    database.accidents().upsert(candidate.toEntity(initialStage, deadline))
+                    hardware?.let { acknowledgeHardware(it) }
+                    _state.value = EmergencyUiState(
+                        stage = initialStage,
+                        eventId = candidate.eventId,
+                        secondsLeft = countdown,
+                        confidence = candidate.confidence,
+                        detail = if (candidate.isSimulation) "模拟演练：不会发送真实短信" else "请确认是否安全；倒计时结束后将自动求救",
+                        canCancel = true,
+                        isSimulation = candidate.isSimulation
+                    )
+                    sendImmediately = false
+                    notifyState()
+                    acquireWakeLock()
+                    activeJob = launchProcessing(candidate.eventId) { runCountdown(candidate, deadline) }
                 }
-                attemptedEventId = candidate.eventId
-                val countdown = (countdownSeconds ?: preferences.countdownSeconds.first()).coerceIn(5, 30)
-                val deadline = System.currentTimeMillis() + countdown * 1_000L
-                val initialStage = EmergencyStage.COUNTDOWN
-                database.accidents().upsert(candidate.toEntity(initialStage, deadline))
-                hardware?.let { acknowledgeHardware(it) }
-                _state.value = EmergencyUiState(
-                    stage = initialStage,
-                    eventId = candidate.eventId,
-                    secondsLeft = countdown,
-                    confidence = candidate.confidence,
-                    detail = if (candidate.isSimulation) "模拟演练：不会发送真实短信" else "请确认是否安全；倒计时结束后将自动求救",
-                    canCancel = true,
-                    isSimulation = candidate.isSimulation
-                )
-                sendImmediately = false
-                notifyState()
-                acquireWakeLock()
-                activeJob = launchProcessing(candidate.eventId) { runCountdown(candidate, deadline) }
-            }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 val detail = "事故流程未能启动，请手动联系紧急联系人；检测器已恢复"
                 attemptedEventId?.let { id ->
                     runCatching { database.accidents().updateStage(id, EmergencyStage.FAILED.name, detail) }
-                    if (_state.value.eventId == id) {
-                        _state.value = _state.value.copy(stage = EmergencyStage.FAILED, detail = detail, canCancel = false)
-                        notifyState()
-                    }
+                    _state.value = EmergencyUiState(stage = EmergencyStage.FAILED, eventId = id, detail = detail)
+                    notifyState()
+                    releaseWakeLock()
                 }
-                context.appGraph.detector.reset()
-                context.appGraph.runtime.updateDetector(context.appGraph.detector.currentSnapshot())
+                if (attemptedEventId != null || _state.value.stage !in ACTIVE_STAGES) {
+                    context.appGraph.detector.reset()
+                    context.appGraph.runtime.updateDetector(context.appGraph.detector.currentSnapshot())
+                }
                 context.appGraph.runtime.postMessage(detail)
-                releaseWakeLock()
             }
         }
     }

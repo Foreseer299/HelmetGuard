@@ -57,7 +57,8 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit) -> Unit, openContacts: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val contacts by graph.database.contacts().observeAll().collectAsState(initial = emptyList())
+    val contactsFlow = remember(graph) { graph.database.contacts().observeAll() }
+    val contacts by contactsFlow.collectAsState(initial = emptyList())
     val selectedSim by graph.preferences.smsSubscriptionId.collectAsState(initial = -1)
     val countdown by graph.preferences.countdownSeconds.collectAsState(initial = 15)
     val riderName by graph.preferences.riderName.collectAsState(initial = "骑手")

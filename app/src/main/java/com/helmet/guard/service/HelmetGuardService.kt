@@ -39,12 +39,14 @@ class HelmetGuardService : Service() {
         graph.runtime.postMessage("后台操作未完成，请检查设备连接和存储空间")
     })
     private val graph by lazy { appGraph }
+    private var foregroundReady = false
     private var simulationJob: Job? = null
     private val simulationDetector = AdvancedAccidentDetector()
 
     override fun onCreate() {
         super.onCreate()
-        enterForeground(includeLocation = false)
+        foregroundReady = enterForeground(includeLocation = false)
+        if (!foregroundReady) return
         scope.launch {
             graph.ble.telemetry.collect {
                 simulationJob?.cancel()
@@ -114,6 +116,7 @@ class HelmetGuardService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!foregroundReady) return START_NOT_STICKY
         when (intent?.action ?: ACTION_START) {
             ACTION_START -> scope.launch {
                 graph.preferences.setMonitoringEnabled(true)
@@ -175,19 +178,22 @@ class HelmetGuardService : Service() {
         }
     }
 
-    private fun enterForeground(includeLocation: Boolean) {
+    private fun enterForeground(includeLocation: Boolean): Boolean {
         val notification = GuardNotifications.monitoring(this, graph.ble.state.value, graph.recorder.state.value.isRecording)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-            if (includeLocation && ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-                type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-            }
-            runCatching { startForeground(GuardNotifications.MONITORING_ID, notification, type) }
-                .onFailure {
-                    graph.runtime.postMessage("无法启动守护服务，请检查蓝牙和定位权限")
-                    stopSelf()
+        val result = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                if (includeLocation && ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                    type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
                 }
-        } else startForeground(GuardNotifications.MONITORING_ID, notification)
+                startForeground(GuardNotifications.MONITORING_ID, notification, type)
+            } else startForeground(GuardNotifications.MONITORING_ID, notification)
+        }
+        if (result.isFailure) {
+            graph.runtime.postMessage("无法启动守护服务，请检查蓝牙和定位权限")
+            if (!includeLocation) stopSelf()
+        }
+        return result.isSuccess
     }
 
     companion object {
