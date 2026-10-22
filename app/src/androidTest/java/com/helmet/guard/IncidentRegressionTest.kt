@@ -79,9 +79,9 @@ class IncidentRegressionTest {
         }
         compose.onNodeWithText("事故事件 1").performClick()
         compose.onNodeWithText("可信度 94% · 峰值 6.42g · 姿态 38°").assertIsDisplayed().performClick()
-        compose.onNode(hasAnyDescendant(hasText("事故与短信回执")) and isRoot()).captureToImage().asAndroidBitmap().let { bitmap ->
-            saveUiPreview(InstrumentationRegistry.getInstrumentation().targetContext, "incident-detail.png", bitmap)
-        }
+        compose.waitForIdle()
+        saveUiPreview(InstrumentationRegistry.getInstrumentation().targetContext, "incident-detail.png",
+            requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()))
         compose.onNodeWithText("事故与短信回执").assertIsDisplayed()
         compose.onNodeWithText("头盔检测").assertIsDisplayed()
         graph.database.accidents().updateStage(101, "PARTIAL_SUCCESS", "部分提交，需要跟进")
@@ -138,9 +138,9 @@ class IncidentRegressionTest {
         graph.incidents.trigger(hardware().copy(hardware = null, isSimulation = true), 30)
         awaitCondition { graph.incidents.state.value.stage == EmergencyStage.COUNTDOWN }
         compose.onNodeWithText("模拟事故演练").assertIsDisplayed()
-        compose.onNode(hasAnyDescendant(hasText("模拟事故演练")) and isRoot()).captureToImage().asAndroidBitmap().let { bitmap ->
-            saveUiPreview(InstrumentationRegistry.getInstrumentation().targetContext, "incident-countdown.png", bitmap)
-        }
+        compose.waitForIdle()
+        saveUiPreview(InstrumentationRegistry.getInstrumentation().targetContext, "incident-countdown.png",
+            requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()))
         compose.onNodeWithText("我安全，取消报警").performClick()
         awaitCondition { graph.incidents.state.value.stage == EmergencyStage.CANCELLED }
     }

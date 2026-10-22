@@ -8,7 +8,7 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.test.platform.app.InstrumentationRegistry
-import com.helmet.guard.ui.screens.HomeScreen
+import com.helmet.guard.ui.GuardApp
 import com.helmet.guard.ui.theme.HelmetGuardTheme
 import org.junit.Rule
 import org.junit.Test
@@ -22,12 +22,12 @@ class UiPreviewTest {
         compose.setContent {
             HelmetGuardTheme(darkTheme = dark) {
                 Surface(color = MaterialTheme.colorScheme.background) {
-                    HomeScreen(context.appGraph, { _ -> }, {}, {}, {}, {}, { _, _ -> })
+                    GuardApp(context.appGraph, { _ -> }, {}, {}, {}, { _, _ -> })
                 }
             }
         }
         compose.waitForIdle()
-        val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()
+        val bitmap = requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
         saveUiPreview(context, name, bitmap)
     }
 
