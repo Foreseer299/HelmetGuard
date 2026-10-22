@@ -66,6 +66,8 @@ class IncidentCoordinator(
 
     fun trigger(incoming: IncidentCandidate, countdownSeconds: Int? = null) {
         scope.launch {
+            var attemptedEventId: Long? = null
+            try {
             mutex.withLock {
                 val candidate = incoming.copy(eventId = maxOf(System.currentTimeMillis(), (database.accidents().maxEventId() ?: 0L) + 1))
                 val hardware = candidate.hardware
@@ -96,6 +98,7 @@ class IncidentCoordinator(
                         return@withLock
                     }
                 }
+                attemptedEventId = candidate.eventId
                 val countdown = (countdownSeconds ?: preferences.countdownSeconds.first()).coerceIn(5, 30)
                 val deadline = System.currentTimeMillis() + countdown * 1_000L
                 val initialStage = EmergencyStage.COUNTDOWN
@@ -114,6 +117,22 @@ class IncidentCoordinator(
                 notifyState()
                 acquireWakeLock()
                 activeJob = launchProcessing(candidate.eventId) { runCountdown(candidate, deadline) }
+            }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                val detail = "事故流程未能启动，请手动联系紧急联系人；检测器已恢复"
+                attemptedEventId?.let { id ->
+                    runCatching { database.accidents().updateStage(id, EmergencyStage.FAILED.name, detail) }
+                    if (_state.value.eventId == id) {
+                        _state.value = _state.value.copy(stage = EmergencyStage.FAILED, detail = detail, canCancel = false)
+                        notifyState()
+                    }
+                }
+                context.appGraph.detector.reset()
+                context.appGraph.runtime.updateDetector(context.appGraph.detector.currentSnapshot())
+                context.appGraph.runtime.postMessage(detail)
+                releaseWakeLock()
             }
         }
     }
@@ -156,9 +175,9 @@ class IncidentCoordinator(
 
     fun restorePending() {
         scope.launch {
-            val pending = database.accidents().pending() ?: return@launch
             mutex.withLock {
                 if (_state.value.stage in ACTIVE_STAGES) return@withLock
+                val pending = database.accidents().pending() ?: return@withLock
                 val candidate = pending.toCandidate()
                 val restoredRemaining = (pending.countdownDeadlineMs - System.currentTimeMillis()).coerceIn(0L, 30_000L)
                 val restoredStage = runCatching { EmergencyStage.valueOf(pending.stage) }.getOrDefault(EmergencyStage.FAILED)

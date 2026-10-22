@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main, "arena/**"]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   pull-requests: write
@@ -99,13 +103,7 @@ jobs:
           arch: x86_64
           profile: pixel_2
           disable-animations: true
-          script: ./gradlew connectedDebugAndroidTest --stacktrace
-      - name: Collect UI previews
-        if: always()
-        run: |
-          mkdir -p ui-previews
-          adb exec-out run-as com.helmet.guard.debug cat files/incident-detail.png > ui-previews/incident-detail.png || true
-          adb exec-out run-as com.helmet.guard.debug cat files/incident-countdown.png > ui-previews/incident-countdown.png || true
+          script: bash scripts/android-regression.sh
       - name: Upload device test reports
         if: always()
         uses: actions/upload-artifact@v4

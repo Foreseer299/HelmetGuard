@@ -43,6 +43,7 @@ abstract class GuardDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE accidents ADD COLUMN hardwareDeviceId INTEGER")
                 db.execSQL("ALTER TABLE accidents ADD COLUMN hardwareEventId INTEGER")
                 db.execSQL("ALTER TABLE accidents ADD COLUMN hardwareAddress TEXT")
+                db.execSQL("CREATE UNIQUE INDEX index_accidents_hardwareDeviceId_hardwareEventId ON accidents(hardwareDeviceId, hardwareEventId)")
             }
         }
 

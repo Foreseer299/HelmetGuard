@@ -35,3 +35,18 @@ fun smsStateText(state: String): String = when (state) {
     "TIMED_OUT" -> "回执超时"
     else -> "状态待确认"
 }
+
+fun connectionPhaseText(phase: com.helmet.guard.domain.ConnectionPhase): String = when (phase) {
+    com.helmet.guard.domain.ConnectionPhase.UNBOUND -> "未绑定"
+    com.helmet.guard.domain.ConnectionPhase.BLUETOOTH_OFF -> "蓝牙关闭"
+    com.helmet.guard.domain.ConnectionPhase.PERMISSION_REQUIRED -> "需要权限"
+    com.helmet.guard.domain.ConnectionPhase.DISCONNECTED -> "未连接"
+    com.helmet.guard.domain.ConnectionPhase.SCANNING -> "搜索中"
+    com.helmet.guard.domain.ConnectionPhase.CONNECTING -> "连接中"
+    com.helmet.guard.domain.ConnectionPhase.NEGOTIATING,
+    com.helmet.guard.domain.ConnectionPhase.DISCOVERING,
+    com.helmet.guard.domain.ConnectionPhase.SUBSCRIBING -> "准备数据"
+    com.helmet.guard.domain.ConnectionPhase.READY -> "数据就绪"
+    com.helmet.guard.domain.ConnectionPhase.STALE -> "数据中断"
+    com.helmet.guard.domain.ConnectionPhase.ERROR -> "连接异常"
+}

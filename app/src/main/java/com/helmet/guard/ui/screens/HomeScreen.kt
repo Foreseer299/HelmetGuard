@@ -147,8 +147,8 @@ fun HomeScreen(
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                MetricCard(Icons.Outlined.Speed, "合加速度", String.format("%.2f", sample?.accelerationG ?: 0f), "g", GuardBlue, Modifier.weight(1f))
-                MetricCard(Icons.Outlined.QueryStats, "角速度", String.format("%.0f", sample?.angularSpeedDps ?: 0f), "°/s", GuardCyan, Modifier.weight(1f))
+                MetricCard(Icons.Outlined.Speed, "合加速度", sample?.let { String.format("%.2f", it.accelerationG) } ?: "--", "g", GuardBlue, Modifier.weight(1f))
+                MetricCard(Icons.Outlined.QueryStats, "角速度", sample?.let { String.format("%.0f", it.angularSpeedDps) } ?: "--", "°/s", GuardCyan, Modifier.weight(1f))
             }
         }
         item {

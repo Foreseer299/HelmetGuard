@@ -56,7 +56,7 @@ data class TelemetrySampleEntity(
     val impactPeakG: Float?, val orientationChangeDeg: Float?, val rejection: String?
 )
 
-@Entity(tableName = "accidents", indices = [Index("detectedAtMs")])
+@Entity(tableName = "accidents", indices = [Index("detectedAtMs"), Index(value = ["hardwareDeviceId", "hardwareEventId"], unique = true)])
 data class AccidentEntity(
     @PrimaryKey val eventId: Long,
     val detectedAtMs: Long,

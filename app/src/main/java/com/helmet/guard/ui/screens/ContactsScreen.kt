@@ -56,6 +56,7 @@ fun ContactsScreen(graph: AppGraph, back: () -> Unit) {
     val scope = rememberCoroutineScope()
     var editing by remember { mutableStateOf<EmergencyContactEntity?>(null) }
     var showEditor by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf<EmergencyContactEntity?>(null) }
 
     LazyColumn(
         Modifier.statusBarsPadding().padding(horizontal = 18.dp),
@@ -65,7 +66,7 @@ fun ContactsScreen(graph: AppGraph, back: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = back) { Icon(Icons.Outlined.ArrowBack, "返回") }
-                SectionTitle("紧急联系人", "按优先级逐一发送真实短信回执")
+                SectionTitle("紧急联系人", "管理求救短信的接收人")
             }
         }
         item {
@@ -89,13 +90,25 @@ fun ContactsScreen(graph: AppGraph, back: () -> Unit) {
                 }
                 Row {
                     TextButton(onClick = { editing = contact; showEditor = true }, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.Edit, null); Text("编辑") }
-                    TextButton(onClick = { scope.launch { graph.database.contacts().delete(contact.id) } }, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.DeleteOutline, null, tint = GuardRed); Text("删除", color = GuardRed) }
+                    TextButton(onClick = { deleting = contact }, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.DeleteOutline, null, tint = GuardRed); Text("删除", color = GuardRed) }
                 }
             }
         }
         item { Spacer(Modifier.height(24.dp)) }
     }
 
+    deleting?.let { contact ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("删除紧急联系人？") },
+            text = { Text("删除后，${contact.name}将不再接收求救短信。") },
+            confirmButton = { TextButton(onClick = {
+                scope.launch { graph.database.contacts().delete(contact.id) }
+                deleting = null
+            }) { Text("删除", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text("保留") } }
+        )
+    }
     if (showEditor) {
         ContactEditor(
             original = editing,

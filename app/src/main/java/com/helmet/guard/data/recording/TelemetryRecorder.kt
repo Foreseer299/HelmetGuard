@@ -12,6 +12,8 @@ import com.helmet.guard.domain.RecordingLabel
 import com.helmet.guard.domain.RecordingSession
 import com.helmet.guard.domain.RecordingState
 import com.helmet.guard.domain.TelemetrySample
+import kotlinx.coroutines.CoroutineExceptionHandler
+import com.helmet.guard.appGraph
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,6 +27,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
@@ -33,7 +36,9 @@ class TelemetryRecorder(
     private val context: Context,
     private val dao: TelemetryDao
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, _ ->
+        context.appGraph.runtime.postMessage("参数记录未保存，请检查存储空间")
+    })
     private val mutex = Mutex()
     @Volatile private var recordingSimulation = false
     val isSimulationRecording: Boolean get() = _state.value.isRecording && recordingSimulation
@@ -65,27 +70,27 @@ class TelemetryRecorder(
         recoveryJob.join()
         require(channels.hasAny) { "至少选择一项记录参数" }
         return mutex.withLock {
-        stopLocked()
-        val now = System.currentTimeMillis()
-        val id = dao.insertSession(
-            TelemetrySessionEntity(
-                startedAtMs = now,
-                endedAtMs = null,
-                label = label.name,
-                notes = notes.trim(),
-                recordAcceleration = channels.acceleration,
-                recordGyroscope = channels.gyroscope,
-                recordAttitude = channels.attitude,
-                recordDeviceState = channels.deviceState,
-                recordDetectorFeatures = channels.detectorFeatures,
-                sampleCount = 0,
-                deviceName = deviceName,
-                isSimulation = isSimulation
+            stopLocked()
+            val now = System.currentTimeMillis()
+            val id = dao.insertSession(
+                TelemetrySessionEntity(
+                    startedAtMs = now,
+                    endedAtMs = null,
+                    label = label.name,
+                    notes = notes.trim(),
+                    recordAcceleration = channels.acceleration,
+                    recordGyroscope = channels.gyroscope,
+                    recordAttitude = channels.attitude,
+                    recordDeviceState = channels.deviceState,
+                    recordDetectorFeatures = channels.detectorFeatures,
+                    sampleCount = 0,
+                    deviceName = deviceName,
+                    isSimulation = isSimulation
+                )
             )
-        )
-        recordingSimulation = isSimulation
-        _state.value = RecordingState(id, now, 0, channels, label)
-        id
+            recordingSimulation = isSimulation
+            _state.value = RecordingState(id, now, 0, channels, label)
+            id
         }
     }
 
@@ -146,9 +151,9 @@ class TelemetryRecorder(
 
     suspend fun loadSamples(sessionId: Long): List<TelemetrySampleEntity> = dao.samples(sessionId)
 
-    suspend fun createCsvShareIntent(sessionId: Long): Intent? {
+    suspend fun createCsvShareIntent(sessionId: Long): Intent? = withContext(Dispatchers.IO) {
         flush()
-        val session = dao.session(sessionId) ?: return null
+        val session = dao.session(sessionId) ?: return@withContext null
         val rows = dao.samples(sessionId)
         val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }
         val file = File(exportDir, "helmetguard-${session.id}-${session.label}.csv")
@@ -166,7 +171,7 @@ class TelemetryRecorder(
             }
         }
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
-        return Intent(Intent.ACTION_SEND).apply {
+        Intent(Intent.ACTION_SEND).apply {
             type = "text/csv"
             putExtra(Intent.EXTRA_STREAM, uri)
             putExtra(Intent.EXTRA_SUBJECT, "HelmetGuard 实验参数 ${session.label}")

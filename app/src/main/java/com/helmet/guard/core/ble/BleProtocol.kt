@@ -42,7 +42,8 @@ data class HardwareIncident(
     val stillnessSeconds: Float,
     val requestedCountdownSeconds: Int,
     val needsAck: Boolean,
-    val deviceId: Long = 0
+    val deviceId: Long = 0,
+    val deviceAddress: String? = null
 )
 
 enum class HelmetButton { SINGLE, DOUBLE, LONG, UNKNOWN }

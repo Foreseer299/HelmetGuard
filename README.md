@@ -1,8 +1,10 @@
-# HelmetGuard 2.0
+# HelmetGuard 2.1
 
 面向 **ESP32-S3 + MPU6050 智能头盔**的 Android 安全应用。从 2.0 起项目采用全新架构，不依赖旧版实现，也不依赖 Google Play 服务；重点适配华为 **HarmonyOS 4** 及国内 Android ROM。
 
 > HelmetGuard 是辅助安全产品，不能替代 120/110、专业救援设备或医疗判断。仅凭单个 IMU 无法在所有环境中保证零误报、零漏报。
+
+2.1 修复事故列表闪退，补齐头盔事件去重、ACK/Cancel、模拟隔离、短信恢复与全局倒计时，并改善界面可读性。变更、验收边界和原实现评价见 [2.1 说明](docs/RELEASE_2.1.md)。
 
 ## 核心能力
 

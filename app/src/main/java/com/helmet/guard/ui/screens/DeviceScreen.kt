@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.helmet.guard.AppGraph
+import com.helmet.guard.ui.connectionPhaseText
 import com.helmet.guard.domain.ConnectionPhase
 import com.helmet.guard.ui.components.InfoCard
 import com.helmet.guard.ui.components.SectionTitle
@@ -74,7 +75,7 @@ fun DeviceScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit) 
         item {
             Spacer(Modifier.height(8.dp))
             SectionTitle("我的头盔", "ESP32-S3 · MPU6050") {
-                StatusPill(if (connection.isReady) "在线" else connection.phase.name, if (connection.isReady) GuardGreen else GuardOrange)
+                StatusPill(connectionPhaseText(connection.phase), if (connection.isReady) GuardGreen else GuardOrange)
             }
         }
         item {
@@ -92,7 +93,7 @@ fun DeviceScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit) 
                 if (connection.isReady) {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         OutlinedButton(onClick = { graph.ble.findHelmet() }, modifier = Modifier.weight(1f)) { Text("响铃查找") }
-                        OutlinedButton(onClick = { graph.ble.calibrate() }, modifier = Modifier.weight(1f)) { Text("校准 IMU") }
+                        OutlinedButton(onClick = { graph.ble.calibrate() }, modifier = Modifier.weight(1f)) { Text("校准传感器") }
                     }
                     OutlinedButton(onClick = { graph.ble.disconnect() }, modifier = Modifier.fillMaxWidth()) { Text("断开连接") }
                 } else {
@@ -161,7 +162,7 @@ fun DeviceScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit) 
                         Icon(Icons.Outlined.Bluetooth, null, tint = if (device.isCompatible) GuardBlue else MaterialTheme.colorScheme.outline)
                         Spacer(Modifier.size(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                 Text(device.name, fontWeight = FontWeight.SemiBold)
                                 Spacer(Modifier.size(8.dp))
                                 StatusPill(
@@ -184,25 +185,25 @@ fun DeviceScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit) 
                 }
             }
         }
-        item { SectionTitle("设备自检", "READY 才代表服务、特征和通知均已就绪") }
+        item { SectionTitle("设备自检", "检查蓝牙数据、传感器与定位是否可用") }
         item {
             InfoCard {
                 SelfCheckRow("蓝牙链路", connection.isReady, if (connection.isReady) "通知订阅完成" else connection.message, Icons.Outlined.Bluetooth)
-                SelfCheckRow("IMU 状态", telemetry?.imuHealthy == true, if (telemetry?.imuHealthy == true) "MPU6050 正常" else "等待健康帧", Icons.Outlined.GraphicEq)
-                SelfCheckRow("零偏校准", telemetry?.calibrated == true, if (telemetry?.calibrated == true) "校准有效" else "需要校准", Icons.Outlined.Tune)
-                SelfCheckRow("实时数据", connection.lastPacketElapsedMs > 0, "累计疑似丢帧 $loss", Icons.Outlined.NotificationsActive)
+                SelfCheckRow("IMU 状态", connection.isReady && telemetry?.imuHealthy == true, if (connection.isReady && telemetry?.imuHealthy == true) "MPU6050 正常" else "等待健康帧", Icons.Outlined.GraphicEq)
+                SelfCheckRow("零偏校准", connection.isReady && telemetry?.calibrated == true, if (connection.isReady && telemetry?.calibrated == true) "校准有效" else "需要校准", Icons.Outlined.Tune)
+                SelfCheckRow("实时数据", connection.isReady && connection.lastPacketElapsedMs > 0, "累计疑似丢帧 $loss", Icons.Outlined.NotificationsActive)
                 SelfCheckRow("定位能力", graph.location.hasForegroundPermission() && graph.location.isLocationEnabled(), "事故发生时使用系统原生定位", Icons.Outlined.MyLocation)
                 SelfCheckRow(
                     "头盔电量",
                     (telemetry?.takeIf { it.batteryValid }?.batteryPercent ?: 0) >= 20,
-                    telemetry?.takeIf { it.batteryValid }?.let { "当前 ${it.batteryPercent}%" } ?: "未配置安全电池分压/等待数据",
+                    telemetry?.takeIf { it.batteryValid }?.let { "当前 ${it.batteryPercent}%" } ?: "设备尚未提供有效电量",
                     Icons.Outlined.Battery5Bar
                 )
             }
         }
         item {
             Text(
-                "提示：蓝牙显示“已连接”不等于可用。HelmetGuard 只有完成 MTU 协商、服务发现和两个通知特征订阅后才进入 READY。",
+                "提示：“数据就绪”表示已完成头盔数据订阅。若显示数据中断，请靠近头盔并检查电源或重新连接。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

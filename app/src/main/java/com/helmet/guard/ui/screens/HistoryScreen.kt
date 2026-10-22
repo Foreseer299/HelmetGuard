@@ -109,7 +109,7 @@ fun HistoryScreen(graph: AppGraph) {
                     Row {
                         OutlinedButton(onClick = {
                             scope.launch {
-                                graph.recorder.createCsvShareIntent(session.id)?.let { context.startActivity(Intent.createChooser(it, "导出 CSV")) }
+                                exportSession(context, graph, session.id)
                             }
                         }, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.Download, null); Text(" 导出 CSV") }
                         IconButton(onClick = { scope.launch { graph.recorder.delete(session.id) } }) { Icon(Icons.Outlined.DeleteOutline, null, tint = GuardRed) }
@@ -152,7 +152,7 @@ fun HistoryScreen(graph: AppGraph) {
     selectedSession?.let { session ->
         SessionDetailDialog(session, sessionSamples, { selectedSession = null }) {
             scope.launch {
-                graph.recorder.createCsvShareIntent(session.id)?.let { context.startActivity(Intent.createChooser(it, "导出 CSV")) }
+                exportSession(context, graph, session.id)
             }
         }
     }
@@ -225,3 +225,15 @@ private fun channelText(session: RecordingSession): String = buildList {
 }.joinToString("/")
 private fun List<Float>.downsample(): List<Float> { if (size <= 180) return this; val step = size / 180f; return List(180) { this[(it * step).toInt().coerceAtMost(lastIndex)] } }
 private fun stageColor(stage: String) = when (stage) { "SENT" -> GuardGreen; "FAILED" -> GuardRed; "CANCELLED", "SIMULATED", "PARTIAL_SUCCESS" -> GuardOrange; else -> GuardBlue }
+
+private suspend fun exportSession(context: android.content.Context, graph: AppGraph, sessionId: Long) {
+    try {
+        val intent = graph.recorder.createCsvShareIntent(sessionId)
+        if (intent == null) graph.runtime.postMessage("这条记录已不存在")
+        else context.startActivity(Intent.createChooser(intent, "导出 CSV"))
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        graph.runtime.postMessage("无法导出记录，请检查可用存储空间和分享应用")
+    }
+}

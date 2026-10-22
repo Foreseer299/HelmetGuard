@@ -67,7 +67,7 @@ class HelmetBleClient(private val context: Context) {
     private var reconnectJob: Job? = null
     private var scanStopJob: Job? = null
     @Volatile private var scannerRunning = false
-    private var lastSequence: Int? = null
+    private val sequenceTracker = PacketSequenceTracker()
     private val commandSequence = AtomicInteger(0)
     private var expectedSubscriptions = 0
     private var completedSubscriptions = 0
@@ -166,7 +166,7 @@ class HelmetBleClient(private val context: Context) {
         closeCurrentGatt()
         telemetryDecoder.reset()
         eventDecoder.reset()
-        lastSequence = null
+        sequenceTracker.resetConnection()
         _state.value = ConnectionState(ConnectionPhase.CONNECTING, HelmetDevice(device.name ?: "HelmetGuard", address), message = "正在连接")
         gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
@@ -365,12 +365,8 @@ class HelmetBleClient(private val context: Context) {
     private fun handleBytes(characteristic: BluetoothGattCharacteristic, bytes: ByteArray) {
         val decoder = if (characteristic.uuid == HelmetProtocol.TELEMETRY_UUID) telemetryDecoder else eventDecoder
         decoder.append(bytes).forEach { frame ->
-            val previous = lastSequence
-            if (previous != null) {
-                val expected = (previous + 1) and 0xff
-                if (frame.sequence != expected) _packetLoss.value += ((frame.sequence - expected) and 0xff).toLong()
-            }
-            lastSequence = frame.sequence
+            if (frame.version != HelmetProtocol.VERSION) return@forEach
+            _packetLoss.value = sequenceTracker.accept(frame.sequence)
             when (frame.type) {
                 HelmetProtocol.TYPE_TELEMETRY -> HelmetFrameCodec.telemetry(frame, SystemClock.elapsedRealtime(), System.currentTimeMillis())?.let {
                     _state.value = _state.value.copy(
@@ -381,7 +377,7 @@ class HelmetBleClient(private val context: Context) {
                     )
                     _telemetry.tryEmit(it)
                 }
-                HelmetProtocol.TYPE_INCIDENT -> HelmetFrameCodec.incident(frame)?.let { _hardwareIncidents.tryEmit(it) }
+                HelmetProtocol.TYPE_INCIDENT -> HelmetFrameCodec.incident(frame)?.let { _hardwareIncidents.tryEmit(it.copy(deviceAddress = _state.value.device?.address ?: targetAddress)) }
                 HelmetProtocol.TYPE_BUTTON -> HelmetFrameCodec.button(frame)?.let { _buttonEvents.tryEmit(it) }
             }
         }

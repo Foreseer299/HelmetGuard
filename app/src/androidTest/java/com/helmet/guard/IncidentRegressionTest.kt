@@ -4,7 +4,9 @@ import android.content.Context
 import android.graphics.Bitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
-import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isRoot
 import com.helmet.guard.ui.components.EmergencyDialog
 import java.io.File
 import androidx.compose.material3.MaterialTheme
@@ -37,7 +39,7 @@ class IncidentRegressionTest {
     private val acks = CopyOnWriteArrayList<HardwareIncidentIdentity>()
     private val cancels = CopyOnWriteArrayList<HardwareIncidentIdentity>()
 
-    @Before fun prepare() = runBlocking {
+    @Before fun prepare() = runBlocking<Unit> {
         val context: Context = InstrumentationRegistry.getInstrumentation().targetContext
         graph = context.appGraph
         graph.database.accidents().clear()
@@ -46,7 +48,10 @@ class IncidentRegressionTest {
     private fun coordinator() = IncidentCoordinator(
         InstrumentationRegistry.getInstrumentation().targetContext,
         graph.database, graph.preferences, graph.location, graph.sms,
-        onHardwareAck = { acks.add(it) },
+        onHardwareAck = { identity ->
+            runBlocking { assertEquals(identity.eventId, graph.database.accidents().byHardwareId(identity.deviceId, identity.eventId)!!.hardwareEventId) }
+            acks.add(identity)
+        },
         onHardwareCancel = { cancels.add(it); true }
     )
 
@@ -60,7 +65,7 @@ class IncidentRegressionTest {
         withTimeout(5_000) { while (!check()) delay(10) }
     }
 
-    @Test fun accidentTabAndDetailRenderAndRefresh() = runBlocking {
+    @Test fun accidentTabAndDetailRenderAndRefresh() = runBlocking<Unit> {
         val now = System.currentTimeMillis()
         graph.database.accidents().upsert(AccidentEntity(
             101, now, now, "HELMET_HARDWARE", "CANCELLED", 0.94f,
@@ -72,7 +77,7 @@ class IncidentRegressionTest {
         }
         compose.onNodeWithText("事故事件 1").performClick()
         compose.onNodeWithText("可信度 94% · 峰值 6.42g · 姿态 38°").assertIsDisplayed().performClick()
-        compose.onRoot().captureToImage().asAndroidBitmap().let { bitmap ->
+        compose.onNode(hasAnyDescendant(hasText("事故与短信回执")) and isRoot()).captureToImage().asAndroidBitmap().let { bitmap ->
             File(InstrumentationRegistry.getInstrumentation().targetContext.filesDir, "incident-detail.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
         compose.onNodeWithText("事故与短信回执").assertIsDisplayed()
@@ -85,7 +90,7 @@ class IncidentRegressionTest {
         compose.onNodeWithText("完成").performClick()
     }
 
-    @Test fun hardwareRetransmissionAfterCancelAndCoordinatorRecreationIsDeduplicated() = runBlocking {
+    @Test fun hardwareRetransmissionAfterCancelAndCoordinatorRecreationIsDeduplicated() = runBlocking<Unit> {
         val first = coordinator()
         first.trigger(hardware(), 30)
         awaitCondition { first.state.value.stage == EmergencyStage.COUNTDOWN && acks.size == 1 }
@@ -104,7 +109,7 @@ class IncidentRegressionTest {
         assertEquals(emptyList<Any>(), graph.database.smsParts().forEvent(localId))
     }
 
-    @Test fun realHardwarePreemptsSimulationAndOriginalIdSurvivesRestore() = runBlocking {
+    @Test fun realHardwarePreemptsSimulationAndOriginalIdSurvivesRestore() = runBlocking<Unit> {
         val first = coordinator()
         first.trigger(hardware().copy(hardware = null, isSimulation = true), 30)
         awaitCondition { first.state.value.stage == EmergencyStage.COUNTDOWN }
@@ -126,19 +131,19 @@ class IncidentRegressionTest {
         assertEquals(hardware().hardware, cancels.last())
     }
 
-    @Test fun globalCountdownIsActionableOutsideHome() = runBlocking {
+    @Test fun globalCountdownIsActionableOutsideHome() = runBlocking<Unit> {
         compose.setContent { MaterialTheme { EmergencyDialog(graph) } }
         graph.incidents.trigger(hardware().copy(hardware = null, isSimulation = true), 30)
         awaitCondition { graph.incidents.state.value.stage == EmergencyStage.COUNTDOWN }
         compose.onNodeWithText("模拟事故演练").assertIsDisplayed()
-        compose.onRoot().captureToImage().asAndroidBitmap().let { bitmap ->
+        compose.onNode(hasAnyDescendant(hasText("模拟事故演练")) and isRoot()).captureToImage().asAndroidBitmap().let { bitmap ->
             File(InstrumentationRegistry.getInstrumentation().targetContext.filesDir, "incident-countdown.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
         compose.onNodeWithText("我安全，取消报警").performClick()
         awaitCondition { graph.incidents.state.value.stage == EmergencyStage.CANCELLED }
     }
 
-    @Test fun simulatedSendingRecoveryNeverCallsRealLocationOrSms() = runBlocking {
+    @Test fun simulatedSendingRecoveryNeverCallsRealLocationOrSms() = runBlocking<Unit> {
         val now = System.currentTimeMillis()
         graph.database.accidents().upsert(AccidentEntity(
             201, now, now, "PHONE_ALGORITHM", "SENDING", 0.9f,

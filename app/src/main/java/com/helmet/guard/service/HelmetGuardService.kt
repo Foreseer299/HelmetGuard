@@ -20,6 +20,7 @@ import com.helmet.guard.domain.DetectionFeatures
 import com.helmet.guard.domain.IncidentCandidate
 import com.helmet.guard.domain.IncidentSource
 import com.helmet.guard.domain.TelemetrySample
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -34,7 +35,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class HelmetGuardService : Service() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, _ ->
+        graph.runtime.postMessage("后台操作未完成，请检查设备连接和存储空间")
+    })
     private val graph by lazy { appGraph }
     private var simulationJob: Job? = null
     private val simulationDetector = AdvancedAccidentDetector()
@@ -52,7 +55,7 @@ class HelmetGuardService : Service() {
             graph.ble.hardwareIncidents.collect { event ->
                 val now = System.currentTimeMillis()
                 simulationJob?.cancel()
-                val address = graph.ble.state.value.device?.address ?: return@collect
+                val address = event.deviceAddress ?: graph.ble.state.value.device?.address.orEmpty()
                 graph.incidents.trigger(
                     IncidentCandidate(
                         now, now, IncidentSource.HELMET_HARDWARE, 0.94f,
@@ -145,10 +148,16 @@ class HelmetGuardService : Service() {
         val engine = if (simulation) simulationDetector else graph.detector
         val result = engine.process(sample, simulation)
         graph.runtime.update(sample, result.snapshot)
-        graph.recorder.record(sample, result.snapshot, simulation)
         result.incident?.let {
             engine.markCountdownActive()
             graph.incidents.trigger(it.copy(isSimulation = simulation))
+        }
+        try {
+            graph.recorder.record(sample, result.snapshot, simulation)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            graph.runtime.postMessage("参数记录失败，请检查存储空间；事故检测继续运行")
         }
     }
 
@@ -174,7 +183,10 @@ class HelmetGuardService : Service() {
                 type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
             }
             runCatching { startForeground(GuardNotifications.MONITORING_ID, notification, type) }
-                .onFailure { startForeground(GuardNotifications.MONITORING_ID, notification) }
+                .onFailure {
+                    graph.runtime.postMessage("无法启动守护服务，请检查蓝牙和定位权限")
+                    stopSelf()
+                }
         } else startForeground(GuardNotifications.MONITORING_ID, notification)
     }
 
