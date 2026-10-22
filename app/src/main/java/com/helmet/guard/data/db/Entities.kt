@@ -75,7 +75,10 @@ data class AccidentEntity(
     val locationTimeMs: Long?,
     val locationProvider: String?,
     val detail: String,
-    val isSimulation: Boolean
+    val isSimulation: Boolean,
+    val hardwareDeviceId: Long? = null,
+    val hardwareEventId: Long? = null,
+    val hardwareAddress: String? = null
 )
 
 @Entity(

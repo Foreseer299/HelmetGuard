@@ -53,6 +53,9 @@ interface TelemetryDao {
 
 @Dao
 interface AccidentDao {
+    @Query("SELECT MAX(eventId) FROM accidents")
+    suspend fun maxEventId(): Long?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: AccidentEntity)
 
@@ -61,6 +64,12 @@ interface AccidentDao {
 
     @Query("SELECT * FROM accidents WHERE stage IN ('COUNTDOWN','LOCATING','SENDING') ORDER BY detectedAtMs DESC LIMIT 1")
     suspend fun pending(): AccidentEntity?
+
+    @Query("SELECT * FROM accidents WHERE hardwareDeviceId = :deviceId AND hardwareEventId = :hardwareEventId LIMIT 1")
+    suspend fun byHardwareId(deviceId: Long, hardwareEventId: Long): AccidentEntity?
+
+    @Query("UPDATE accidents SET hardwareDeviceId = :deviceId, hardwareEventId = :hardwareEventId, hardwareAddress = :address WHERE eventId = :eventId")
+    suspend fun attachHardware(eventId: Long, deviceId: Long, hardwareEventId: Long, address: String)
 
     @Query("SELECT * FROM accidents WHERE eventId = :eventId LIMIT 1")
     suspend fun byId(eventId: Long): AccidentEntity?
@@ -95,7 +104,7 @@ interface SmsPartDao {
     @Query("SELECT * FROM sms_parts WHERE eventId = :eventId ORDER BY contactId, kind, partIndex")
     suspend fun forEvent(eventId: Long): List<SmsPartEntity>
 
-    @Query("UPDATE sms_parts SET state = 'TIMED_OUT', detail = :detail, updatedAtMs = :updatedAtMs WHERE eventId = :eventId AND state = 'QUEUED'")
+    @Query("UPDATE sms_parts SET state = 'TIMED_OUT', detail = :detail, updatedAtMs = :updatedAtMs WHERE eventId = :eventId AND kind = 'SENT' AND state = 'QUEUED'")
     suspend fun markQueuedTimedOut(eventId: Long, detail: String, updatedAtMs: Long = System.currentTimeMillis())
 }
 

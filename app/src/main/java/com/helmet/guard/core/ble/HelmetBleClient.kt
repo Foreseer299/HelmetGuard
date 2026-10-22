@@ -44,7 +44,8 @@ class HelmetBleClient(private val context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val manager = context.getSystemService(BluetoothManager::class.java)
     private val adapter: BluetoothAdapter? get() = manager?.adapter
-    private val decoder = FrameStreamDecoder()
+    private val telemetryDecoder = FrameStreamDecoder()
+    private val eventDecoder = FrameStreamDecoder()
 
     private val _state = MutableStateFlow(ConnectionState())
     val state: StateFlow<ConnectionState> = _state.asStateFlow()
@@ -161,8 +162,10 @@ class HelmetBleClient(private val context: Context) {
         explicitDisconnect = false
         targetAddress = address
         reconnectJob?.cancel()
+        clearOperations()
         closeCurrentGatt()
-        decoder.reset()
+        telemetryDecoder.reset()
+        eventDecoder.reset()
         lastSequence = null
         _state.value = ConnectionState(ConnectionPhase.CONNECTING, HelmetDevice(device.name ?: "HelmetGuard", address), message = "正在连接")
         gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -328,11 +331,11 @@ class HelmetBleClient(private val context: Context) {
 
         @Deprecated("Deprecated by Android")
         override fun onCharacteristicChanged(callbackGatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
-            if (callbackGatt === gatt) @Suppress("DEPRECATION") handleBytes(characteristic.value)
+            if (callbackGatt === gatt) @Suppress("DEPRECATION") handleBytes(characteristic, characteristic.value)
         }
 
         override fun onCharacteristicChanged(callbackGatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
-            if (callbackGatt === gatt) handleBytes(value)
+            if (callbackGatt === gatt) handleBytes(characteristic, value)
         }
     }
 
@@ -359,7 +362,8 @@ class HelmetBleClient(private val context: Context) {
         }
     }
 
-    private fun handleBytes(bytes: ByteArray) {
+    private fun handleBytes(characteristic: BluetoothGattCharacteristic, bytes: ByteArray) {
+        val decoder = if (characteristic.uuid == HelmetProtocol.TELEMETRY_UUID) telemetryDecoder else eventDecoder
         decoder.append(bytes).forEach { frame ->
             val previous = lastSequence
             if (previous != null) {
@@ -428,7 +432,8 @@ class HelmetBleClient(private val context: Context) {
         clearOperations()
         runCatching { callbackGatt.close() }
         gatt = null
-        decoder.reset()
+        telemetryDecoder.reset()
+        eventDecoder.reset()
         _state.value = _state.value.copy(phase = ConnectionPhase.DISCONNECTED, message = message)
         if (!explicitDisconnect) scheduleReconnect()
     }
@@ -449,7 +454,8 @@ class HelmetBleClient(private val context: Context) {
         runCatching { active?.disconnect() }
         runCatching { active?.close() }
         targetAddress = null
-        decoder.reset()
+        telemetryDecoder.reset()
+        eventDecoder.reset()
         _state.value = _state.value.copy(phase = ConnectionPhase.ERROR, message = message)
     }
 

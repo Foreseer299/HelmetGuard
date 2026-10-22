@@ -84,6 +84,7 @@ class BleProtocolTest {
             hex("AA 55 01 02 2B 10 44 33 22 11 88 77 66 55 82 02 DB 02 19 00 0F 03 7B")
         )!!
         val incident = HelmetFrameCodec.incident(frame)!!
+        assertEquals(0x11223344L, incident.deviceId)
         assertEquals(0x55667788L, incident.eventId)
         assertEquals(6.42f, incident.peakAccelerationG, 0.001f)
         assertEquals(731f, incident.peakAngularSpeedDps, 0.001f)
@@ -97,6 +98,14 @@ class BleProtocolTest {
         expected.forEach { (code, button) ->
             val frame = FrameStreamDecoder().parse(HelmetFrameCodec.encode(HelmetProtocol.TYPE_BUTTON, code, byteArrayOf(code.toByte())))!!
             assertEquals(button, HelmetFrameCodec.button(frame))
+        }
+    }
+
+    @Test fun `ack and cancel retain unsigned hardware event id and source byte`() {
+        for (command in listOf(HelmetProtocol.CMD_ACK_INCIDENT, HelmetProtocol.CMD_CANCEL)) {
+            val encoded = HelmetFrameCodec.command(command, 0xF1234567L, argument = 3)
+            val frame = FrameStreamDecoder().parse(encoded)!!
+            assertArrayEquals(hex("${"%02X".format(command)} 67 45 23 F1 03"), frame.payload)
         }
     }
 

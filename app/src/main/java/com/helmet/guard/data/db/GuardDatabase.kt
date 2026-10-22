@@ -16,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SmsPartEntity::class,
         SystemLogEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 abstract class GuardDatabase : RoomDatabase() {
@@ -34,8 +34,16 @@ abstract class GuardDatabase : RoomDatabase() {
                 context.applicationContext,
                 GuardDatabase::class.java,
                 "helmet_guard_v2.db"
-            ).addMigrations(MIGRATION_1_2)
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build().also { instance = it }
+        }
+
+        internal val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE accidents ADD COLUMN hardwareDeviceId INTEGER")
+                db.execSQL("ALTER TABLE accidents ADD COLUMN hardwareEventId INTEGER")
+                db.execSQL("ALTER TABLE accidents ADD COLUMN hardwareAddress TEXT")
+            }
         }
 
         /** Adds the battery-valid flag without discarding contacts, recordings or incidents. */

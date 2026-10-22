@@ -15,6 +15,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import com.helmet.guard.ui.components.EmergencyDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -39,7 +40,7 @@ private val destinations = listOf(
     Destination("device", "设备", Icons.Outlined.Watch),
     Destination("telemetry", "数据", Icons.Outlined.Dataset),
     Destination("history", "记录", Icons.Outlined.History),
-    Destination("settings", "我的", Icons.Outlined.Settings)
+    Destination("settings", "设置", Icons.Outlined.Settings)
 )
 
 @Composable
@@ -51,6 +52,7 @@ fun GuardApp(
     associateCompanion: () -> Unit,
     runServiceAction: (String, Intent.() -> Unit) -> Unit
 ) {
+    EmergencyDialog(graph)
     val navController = rememberNavController()
     val backStack by navController.currentBackStackEntryAsState()
     val route = backStack?.destination?.route

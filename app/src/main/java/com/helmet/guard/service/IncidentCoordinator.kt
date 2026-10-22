@@ -16,15 +16,18 @@ import com.helmet.guard.domain.DetectionFeatures
 import com.helmet.guard.domain.EmergencyContact
 import com.helmet.guard.domain.EmergencyStage
 import com.helmet.guard.domain.EmergencyUiState
+import com.helmet.guard.domain.HardwareIncidentIdentity
 import com.helmet.guard.domain.IncidentCandidate
 import com.helmet.guard.domain.IncidentSource
 import com.helmet.guard.domain.LocationFix
 import com.helmet.guard.domain.SmsPartState
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,9 +43,19 @@ class IncidentCoordinator(
     private val database: GuardDatabase,
     private val preferences: GuardPreferences,
     private val locationProvider: NativeLocationProvider,
-    private val smsPipeline: SmsPipeline
+    private val smsPipeline: SmsPipeline,
+    private val onHardwareAck: (HardwareIncidentIdentity) -> Unit = { hardware ->
+        val ble = context.appGraph.ble
+        if (ble.state.value.device?.address == hardware.address) ble.acknowledge(hardware.eventId)
+    },
+    private val onHardwareCancel: (HardwareIncidentIdentity) -> Boolean = { hardware ->
+        val ble = context.appGraph.ble
+        ble.state.value.device?.address == hardware.address && ble.cancelAlarm(hardware.eventId)
+    }
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, _ ->
+        context.appGraph.runtime.postMessage("事故处理未完成，请检查应用状态并手动求助；头盔未确认的事件会继续重发")
+    })
     private val mutex = Mutex()
     private val notifications = context.getSystemService(NotificationManager::class.java)
     private val _state = MutableStateFlow(EmergencyUiState())
@@ -51,14 +64,43 @@ class IncidentCoordinator(
     private var wakeLock: PowerManager.WakeLock? = null
     @Volatile private var sendImmediately = false
 
-    fun trigger(candidate: IncidentCandidate, countdownSeconds: Int? = null) {
+    fun trigger(incoming: IncidentCandidate, countdownSeconds: Int? = null) {
         scope.launch {
             mutex.withLock {
-                if (_state.value.stage in ACTIVE_STAGES) return@withLock
+                val candidate = incoming.copy(eventId = maxOf(System.currentTimeMillis(), (database.accidents().maxEventId() ?: 0L) + 1))
+                val hardware = candidate.hardware
+                if (hardware != null) {
+                    val existing = database.accidents().byHardwareId(hardware.deviceId, hardware.eventId)
+                    if (existing != null) {
+                        acknowledgeHardware(hardware)
+                        if (existing.stage == EmergencyStage.CANCELLED.name) cancelHardware(hardware)
+                        return@withLock
+                    }
+                }
+                val current = _state.value
+                if (current.stage in ACTIVE_STAGES) {
+                    if (current.isSimulation && !candidate.isSimulation) {
+                        activeJob?.cancelAndJoin()
+                        current.eventId?.let { database.accidents().updateStage(it, EmergencyStage.CANCELLED.name, "真实事件到达，演练已停止") }
+                        releaseWakeLock()
+                    } else {
+                        // A hardware confirmation may belong to an already active phone detection.
+                        // Persist its original wire identity before stopping firmware retransmission.
+                        if (hardware != null && !current.isSimulation && current.eventId != null) {
+                            val active = database.accidents().byId(current.eventId)
+                            if (active != null && active.hardwareEventId == null) {
+                                database.accidents().attachHardware(active.eventId, hardware.deviceId, hardware.eventId, hardware.address)
+                                acknowledgeHardware(hardware)
+                            }
+                        }
+                        return@withLock
+                    }
+                }
                 val countdown = (countdownSeconds ?: preferences.countdownSeconds.first()).coerceIn(5, 30)
                 val deadline = System.currentTimeMillis() + countdown * 1_000L
-                val initialStage = if (candidate.isSimulation) EmergencyStage.COUNTDOWN else EmergencyStage.COUNTDOWN
+                val initialStage = EmergencyStage.COUNTDOWN
                 database.accidents().upsert(candidate.toEntity(initialStage, deadline))
+                hardware?.let { acknowledgeHardware(it) }
                 _state.value = EmergencyUiState(
                     stage = initialStage,
                     eventId = candidate.eventId,
@@ -68,6 +110,7 @@ class IncidentCoordinator(
                     canCancel = true,
                     isSimulation = candidate.isSimulation
                 )
+                sendImmediately = false
                 notifyState()
                 acquireWakeLock()
                 activeJob = launchProcessing(candidate.eventId) { runCountdown(candidate, deadline) }
@@ -87,9 +130,13 @@ class IncidentCoordinator(
         scope.launch {
             mutex.withLock {
                 val current = _state.value
-                if (current.stage !in ACTIVE_STAGES || (eventId != null && eventId >= 0 && current.eventId != eventId)) return@withLock
-                activeJob?.cancel()
-                current.eventId?.let { database.accidents().updateStage(it, EmergencyStage.CANCELLED.name, "用户确认安全并取消") }
+                if (current.stage != EmergencyStage.COUNTDOWN || (eventId != null && eventId >= 0 && current.eventId != eventId)) return@withLock
+                activeJob?.cancelAndJoin()
+                current.eventId?.let {
+                    val record = database.accidents().byId(it)
+                    database.accidents().updateStage(it, EmergencyStage.CANCELLED.name, "用户确认安全并取消")
+                    record?.hardwareIdentity()?.let { hardware -> cancelHardware(hardware) }
+                }
                 _state.value = current.copy(stage = EmergencyStage.CANCELLED, secondsLeft = 0, detail = "已确认安全，本次不会发送求救短信", canCancel = false)
                 notifyState()
                 releaseWakeLock()
@@ -121,11 +168,16 @@ class IncidentCoordinator(
                     pending.confidence, "恢复上次未完成的事故处理", pending.stage == EmergencyStage.COUNTDOWN.name,
                     pending.isSimulation
                 )
+                sendImmediately = false
                 notifyState()
                 acquireWakeLock()
                 activeJob = launchProcessing(candidate.eventId) {
                     if (pending.stage == EmergencyStage.COUNTDOWN.name) {
                         runCountdown(candidate, System.currentTimeMillis() + restoredRemaining)
+                    } else if (pending.stage == EmergencyStage.SENDING.name && database.smsParts().forEvent(pending.eventId).any { it.kind == "SENT" }) {
+                        // The platform may already have sent these parts before process death.
+                        // Resume receipts instead of issuing a second sendMultipartTextMessage.
+                        awaitSmsResults(pending.eventId, pending.locationFix())
                     } else dispatch(candidate)
                 }
             }
@@ -154,7 +206,6 @@ class IncidentCoordinator(
     }
 
     private suspend fun runCountdown(candidate: IncidentCandidate, wallDeadlineMs: Long) {
-        sendImmediately = false
         val remainingAtStart = (wallDeadlineMs - System.currentTimeMillis()).coerceAtLeast(0)
         val elapsedDeadline = android.os.SystemClock.elapsedRealtime() + remainingAtStart
         while (true) {
@@ -172,10 +223,18 @@ class IncidentCoordinator(
             releaseWakeLock()
             return
         }
+        mutex.withLock {
+            _state.value = _state.value.copy(stage = EmergencyStage.LOCATING, secondsLeft = 0, canCancel = false)
+        }
         dispatch(candidate)
     }
 
     private suspend fun dispatch(candidate: IncidentCandidate) {
+        // Also protects restoration of a simulation interrupted after countdown.
+        if (candidate.isSimulation) {
+            finish(candidate.eventId, EmergencyStage.SIMULATED, "演练完成：定位与短信均未真实执行", null)
+            return
+        }
         val eventId = candidate.eventId
         database.accidents().updateStage(eventId, EmergencyStage.LOCATING.name, "正在获取事故位置")
         _state.value = _state.value.copy(stage = EmergencyStage.LOCATING, secondsLeft = 0, detail = "正在通过系统定位服务获取位置", canCancel = false)
@@ -220,6 +279,10 @@ class IncidentCoordinator(
 
         _state.value = _state.value.copy(detail = "已排队 ${report.queuedContacts} 位联系人、${report.queuedParts} 个短信分段，等待运营商回执")
         notifyState()
+        awaitSmsResults(eventId, fix)
+    }
+
+    private suspend fun awaitSmsResults(eventId: Long, fix: LocationFix?) {
         withTimeoutOrNull(20_000) {
             database.smsParts().observeForEvent(eventId).first { rows ->
                 val submitted = rows.filter { it.kind == "SENT" }
@@ -269,7 +332,7 @@ class IncidentCoordinator(
         val manager = context.getSystemService(PowerManager::class.java) ?: return
         wakeLock = manager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "HelmetGuard:incident").apply {
             setReferenceCounted(false)
-            acquire(45_000)
+            acquire(70_000)
         }
     }
 
@@ -283,15 +346,34 @@ class IncidentCoordinator(
         features.peakAccelerationG, features.peakAngularSpeedDps, features.orientationChangeDeg,
         features.freeFallDurationMs, deadline,
         null, null, null, null, null,
-        if (isSimulation) "模拟事故" else "等待用户确认", isSimulation
+        if (isSimulation) "模拟事故" else "等待用户确认", isSimulation,
+        hardware?.deviceId, hardware?.eventId, hardware?.address
     )
 
     private fun AccidentEntity.toCandidate() = IncidentCandidate(
         eventId, detectedAtMs, runCatching { IncidentSource.valueOf(source) }.getOrDefault(IncidentSource.PHONE_ALGORITHM),
         confidence,
         DetectionFeatures(peakAccelerationG, peakAngularSpeedDps, orientationChangeDeg, freeFallDurationMs),
-        isSimulation
+        isSimulation, hardwareIdentity()
     )
+
+    private fun AccidentEntity.locationFix(): LocationFix? {
+        return LocationFix(latitude ?: return null, longitude ?: return null, locationAccuracyMeters ?: 9999f,
+            locationTimeMs ?: detectedAtMs, locationProvider ?: "unknown", historical = true)
+    }
+
+    private fun AccidentEntity.hardwareIdentity(): HardwareIncidentIdentity? {
+        return HardwareIncidentIdentity(hardwareDeviceId ?: return null, hardwareEventId ?: return null, hardwareAddress ?: return null)
+    }
+
+    private fun acknowledgeHardware(hardware: HardwareIncidentIdentity) {
+        runCatching { onHardwareAck(hardware) }
+    }
+
+    private fun cancelHardware(hardware: HardwareIncidentIdentity) {
+        val queued = runCatching { onHardwareCancel(hardware) }.getOrDefault(false)
+        if (!queued) context.appGraph.runtime.postMessage("手机已取消；头盔未连接，请长按头盔按键取消本地报警")
+    }
 
     companion object {
         private val ACTIVE_STAGES = setOf(EmergencyStage.COUNTDOWN, EmergencyStage.LOCATING, EmergencyStage.SENDING)

@@ -10,6 +10,9 @@ import android.os.IBinder
 import androidx.core.content.ContextCompat
 import com.helmet.guard.appGraph
 import com.helmet.guard.core.ble.HelmetButton
+import com.helmet.guard.core.detector.AdvancedAccidentDetector
+import com.helmet.guard.domain.HardwareIncidentIdentity
+import com.helmet.guard.domain.EmergencyStage
 import com.helmet.guard.core.detector.MockScenario
 import com.helmet.guard.core.detector.MockTelemetryEngine
 import com.helmet.guard.domain.ConnectionPhase
@@ -34,17 +37,22 @@ class HelmetGuardService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val graph by lazy { appGraph }
     private var simulationJob: Job? = null
+    private val simulationDetector = AdvancedAccidentDetector()
 
     override fun onCreate() {
         super.onCreate()
         enterForeground(includeLocation = false)
         scope.launch {
-            graph.ble.telemetry.collect { processSample(it, false) }
+            graph.ble.telemetry.collect {
+                simulationJob?.cancel()
+                processSample(it, false)
+            }
         }
         scope.launch {
             graph.ble.hardwareIncidents.collect { event ->
                 val now = System.currentTimeMillis()
-                graph.ble.acknowledge(event.eventId)
+                simulationJob?.cancel()
+                val address = graph.ble.state.value.device?.address ?: return@collect
                 graph.incidents.trigger(
                     IncidentCandidate(
                         now, now, IncidentSource.HELMET_HARDWARE, 0.94f,
@@ -52,11 +60,12 @@ class HelmetGuardService : Service() {
                             peakAccelerationG = event.peakAccelerationG,
                             peakAngularSpeedDps = event.peakAngularSpeedDps,
                             postImpactGyroRms = 0f
-                        )
+                        ),
+                        hardware = HardwareIncidentIdentity(event.deviceId, event.eventId, address)
                     ),
                     event.requestedCountdownSeconds.takeIf { it in 5..30 }
                 )
-                graph.detector.markCountdownActive()
+
             }
         }
         scope.launch {
@@ -86,6 +95,14 @@ class HelmetGuardService : Service() {
                 }
         }
         scope.launch {
+            graph.incidents.state.map { it.stage }.distinctUntilChanged().collect { stage ->
+                if (stage !in setOf(EmergencyStage.COUNTDOWN, EmergencyStage.LOCATING, EmergencyStage.SENDING)) {
+                    graph.detector.reset()
+                    simulationDetector.reset()
+                }
+            }
+        }
+        scope.launch {
             while (isActive) {
                 graph.preferences.heartbeat()
                 delay(60_000)
@@ -101,6 +118,7 @@ class HelmetGuardService : Service() {
             }
             ACTION_STOP -> scope.launch {
                 graph.preferences.setMonitoringEnabled(false)
+                simulationJob?.cancel()
                 graph.recorder.stop()
                 graph.ble.disconnect()
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -124,20 +142,26 @@ class HelmetGuardService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private suspend fun processSample(sample: TelemetrySample, simulation: Boolean) {
-        val result = graph.detector.process(sample, simulation)
+        val engine = if (simulation) simulationDetector else graph.detector
+        val result = engine.process(sample, simulation)
         graph.runtime.update(sample, result.snapshot)
-        graph.recorder.record(sample, result.snapshot)
+        graph.recorder.record(sample, result.snapshot, simulation)
         result.incident?.let {
-            graph.detector.markCountdownActive()
-            graph.incidents.trigger(it)
+            engine.markCountdownActive()
+            graph.incidents.trigger(it.copy(isSimulation = simulation))
         }
     }
 
     private fun runSimulation(rawScenario: String?) {
+        if ((graph.recorder.state.value.isRecording && !graph.recorder.isSimulationRecording) || graph.ble.state.value.phase in setOf(ConnectionPhase.READY, ConnectionPhase.STALE) ||
+            graph.incidents.state.value.stage in setOf(EmergencyStage.COUNTDOWN, EmergencyStage.LOCATING, EmergencyStage.SENDING)) {
+            graph.runtime.postMessage("请先停止记录、断开头盔并完成当前事故处理，再运行模拟演练")
+            return
+        }
         val scenario = runCatching { MockScenario.valueOf(rawScenario.orEmpty()) }.getOrDefault(MockScenario.NORMAL_RIDE)
         simulationJob?.cancel()
         simulationJob = scope.launch {
-            graph.detector.reset()
+            simulationDetector.reset()
             MockTelemetryEngine().play(scenario).collect { processSample(it, true) }
         }
     }

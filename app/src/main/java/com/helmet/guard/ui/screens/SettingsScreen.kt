@@ -43,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.helmet.guard.BuildConfig
 import com.helmet.guard.AppGraph
 import com.helmet.guard.ui.components.InfoCard
 import com.helmet.guard.ui.components.SectionTitle
@@ -99,7 +100,7 @@ fun SettingsScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit
                 TextButton(onClick = { context.startActivity(graph.reliability.appDetailsIntent()) }) { Text("后台定位请在权限中选择“始终允许”") }
             }
         }
-        item { SectionTitle("${guide.brand} 后台保护", "这些开关无法由应用自动读取或代为开启") }
+        item { SectionTitle("${guide.brand} 后台保护", "按下面的指引设置，避免锁屏后守护中断") }
         item {
             InfoCard {
                 guide.steps.forEachIndexed { index, step ->
@@ -110,7 +111,7 @@ fun SettingsScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit
                     OutlinedButton(onClick = { runCatching { context.startActivity(intent) } }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.PhoneAndroid, null); Text(" 尝试打开系统管家") }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) { Text("我已完成品牌设置", fontWeight = FontWeight.SemiBold); Text("这是人工确认，不会伪装成系统检测", style = MaterialTheme.typography.bodyMedium) }
+                    Column(Modifier.weight(1f)) { Text("我已完成品牌设置", fontWeight = FontWeight.SemiBold); Text("请在完成以上系统设置后开启", style = MaterialTheme.typography.bodyMedium) }
                     Switch(oemConfirmed, { scope.launch { graph.preferences.setOemSetupConfirmed(it) } })
                 }
             }
@@ -127,7 +128,7 @@ fun SettingsScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit
                         FilterChip(selectedSim == id, { scope.launch { graph.preferences.setSmsSubscriptionId(id) } }, label = { Text(name) })
                     }
                 }
-                Text("双卡手机必须明确选择。应用使用该 subscription ID 发送，并记录每个短信分段的提交和送达回执。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("双卡手机必须明确选择。应用将使用所选 SIM 发送，并记录短信提交和送达回执。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         item { SectionTitle("事故策略") }
@@ -135,12 +136,12 @@ fun SettingsScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit
             InfoCard {
                 Text("自动求救倒计时：${localCountdown.toInt()} 秒", fontWeight = FontWeight.SemiBold)
                 Slider(localCountdown, { localCountdown = it }, valueRange = 5f..30f, steps = 24, onValueChangeFinished = { scope.launch { graph.preferences.setCountdownSeconds(localCountdown.toInt()) } })
-                Text("高精度检测器会结合冲击、旋转、姿态变化、自由落体、碰撞前运动和碰撞后静止进行判断。单个 MPU6050 无法保证零误报，正式硬件建议增加佩戴传感器。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("检测器会结合冲击、旋转、姿态变化、自由落体、碰撞前运动和碰撞后静止进行判断。单个 MPU6050 无法保证零误报，正式硬件建议增加佩戴传感器。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         item {
             InfoCard {
-                Text("HelmetGuard 2.0", fontWeight = FontWeight.Bold)
+                Text("HelmetGuard ${BuildConfig.VERSION_NAME}", fontWeight = FontWeight.Bold)
                 Text("面向 ESP32-S3 + MPU6050 与 HarmonyOS 4 / 国内 Android ROM。无需 Google Play 服务，不使用无障碍自动点击，也不绕过系统短信安全确认。", style = MaterialTheme.typography.bodyMedium)
                 Text("紧急情况下请优先拨打 120 / 110。本产品不能替代专业救援设备。", color = GuardRed, fontWeight = FontWeight.SemiBold)
             }

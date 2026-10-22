@@ -87,8 +87,11 @@ data class IncidentCandidate(
     val source: IncidentSource,
     val confidence: Float,
     val features: DetectionFeatures,
-    val isSimulation: Boolean = false
+    val isSimulation: Boolean = false,
+    val hardware: HardwareIncidentIdentity? = null
 )
+
+data class HardwareIncidentIdentity(val deviceId: Long, val eventId: Long, val address: String)
 
 data class DetectorResult(
     val snapshot: DetectorSnapshot,

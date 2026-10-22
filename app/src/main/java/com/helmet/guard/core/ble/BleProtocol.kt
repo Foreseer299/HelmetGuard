@@ -41,7 +41,8 @@ data class HardwareIncident(
     val peakAngularSpeedDps: Float,
     val stillnessSeconds: Float,
     val requestedCountdownSeconds: Int,
-    val needsAck: Boolean
+    val needsAck: Boolean,
+    val deviceId: Long = 0
 )
 
 enum class HelmetButton { SINGLE, DOUBLE, LONG, UNKNOWN }
@@ -141,14 +142,14 @@ object HelmetFrameCodec {
     fun incident(frame: ProtocolFrame): HardwareIncident? {
         if (frame.version != HelmetProtocol.VERSION || frame.type != HelmetProtocol.TYPE_INCIDENT || frame.payload.size != 16) return null
         val b = ByteBuffer.wrap(frame.payload).order(ByteOrder.LITTLE_ENDIAN)
-        b.int // device id reserved
+        val deviceId = b.int.toLong() and 0xffffffffL
         val eventId = b.int.toLong() and 0xffffffffL
         val peakAcc = b.short / 100f
         val peakGyro = b.short.toInt().toFloat()
         val still = (b.short.toInt() and 0xffff) / 10f
         val countdown = b.get().toInt() and 0xff
         val flags = b.get().toInt() and 0xff
-        return HardwareIncident(eventId, peakAcc, peakGyro, still, countdown, flags and 0x01 != 0)
+        return HardwareIncident(eventId, peakAcc, peakGyro, still, countdown, flags and 0x01 != 0, deviceId)
     }
 
     fun button(frame: ProtocolFrame): HelmetButton? {

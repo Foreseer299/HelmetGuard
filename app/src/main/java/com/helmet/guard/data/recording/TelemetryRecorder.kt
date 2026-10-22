@@ -35,6 +35,8 @@ class TelemetryRecorder(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
+    @Volatile private var recordingSimulation = false
+    val isSimulationRecording: Boolean get() = _state.value.isRecording && recordingSimulation
     private val pending = mutableListOf<TelemetrySampleEntity>()
     private val _state = MutableStateFlow(RecordingState())
     val state: StateFlow<RecordingState> = _state.asStateFlow()
@@ -62,7 +64,8 @@ class TelemetryRecorder(
     ): Long {
         recoveryJob.join()
         require(channels.hasAny) { "至少选择一项记录参数" }
-        if (_state.value.isRecording) stop()
+        return mutex.withLock {
+        stopLocked()
         val now = System.currentTimeMillis()
         val id = dao.insertSession(
             TelemetrySessionEntity(
@@ -80,19 +83,24 @@ class TelemetryRecorder(
                 isSimulation = isSimulation
             )
         )
+        recordingSimulation = isSimulation
         _state.value = RecordingState(id, now, 0, channels, label)
-        return id
+        id
+        }
     }
 
-    suspend fun stop() {
+    suspend fun stop() = mutex.withLock { stopLocked() }
+
+    private suspend fun stopLocked() {
         val current = _state.value
         val id = current.activeSessionId ?: return
-        flush()
+        flushLocked()
         dao.finishSession(id, System.currentTimeMillis(), _state.value.sampleCount)
         _state.value = RecordingState(channels = current.channels, label = current.label)
     }
 
-    suspend fun record(sample: TelemetrySample, detector: DetectorSnapshot) {
+    suspend fun record(sample: TelemetrySample, detector: DetectorSnapshot, isSimulation: Boolean = false) {
+        if (recordingSimulation != isSimulation) return
         val current = _state.value
         val sessionId = current.activeSessionId ?: return
         val c = current.channels
@@ -123,8 +131,10 @@ class TelemetryRecorder(
             rejection = detector.lastRejection?.name.takeIf { c.detectorFeatures }
         )
         mutex.withLock {
+            val latest = _state.value
+            if (latest.activeSessionId != sessionId || recordingSimulation != isSimulation) return@withLock
             pending += row
-            _state.value = current.copy(sampleCount = current.sampleCount + 1)
+            _state.value = latest.copy(sampleCount = latest.sampleCount + 1)
             if (pending.size >= 100) flushLocked()
         }
     }
@@ -169,8 +179,8 @@ class TelemetryRecorder(
     private suspend fun flushLocked() {
         if (pending.isEmpty()) return
         val batch = pending.toList()
-        pending.clear()
         dao.insertSamples(batch)
+        pending.clear()
         _state.value.activeSessionId?.let { dao.updateCount(it, _state.value.sampleCount) }
     }
 

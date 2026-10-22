@@ -13,10 +13,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Typography
 
 val GuardBlue = Color(0xFF2764FF)
-val GuardCyan = Color(0xFF16C7C9)
-val GuardGreen = Color(0xFF2CCB8D)
-val GuardOrange = Color(0xFFFFA63D)
-val GuardRed = Color(0xFFFF5267)
+val GuardCyan = Color(0xFF087F86)
+val GuardGreen = Color(0xFF13845B)
+val GuardOrange = Color(0xFFA45A05)
+val GuardRed = Color(0xFFD92D4C)
 val Ink = Color(0xFF10213D)
 val Cloud = Color(0xFFF4F7FC)
 
