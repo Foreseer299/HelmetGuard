@@ -4,9 +4,5 @@ set +e
 ./gradlew connectedDebugAndroidTest --stacktrace
 test_status=$?
 mkdir -p ui-previews
-for preview in incident-detail incident-countdown home-light home-dark; do
-    if ! adb exec-out run-as com.helmet.guard.debug cat "files/${preview}.png" > "ui-previews/${preview}.png"; then
-        rm -f "ui-previews/${preview}.png"
-    fi
-done
+adb pull /sdcard/Pictures/HelmetGuard/. ui-previews/ || true
 exit "$test_status"

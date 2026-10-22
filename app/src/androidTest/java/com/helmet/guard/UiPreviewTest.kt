@@ -28,7 +28,7 @@ class UiPreviewTest {
         }
         compose.waitForIdle()
         val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()
-        File(context.filesDir, name).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        saveUiPreview(context, name, bitmap)
     }
 
     @Test fun homeLightPreview() { capture(false, "home-light.png") }
