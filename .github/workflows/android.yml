@@ -91,12 +91,25 @@ jobs:
         include:
           - suite: incident-regression
             disable-animations: true
+            animation-scale: '0'
+            font-scale: '1.0'
+            display-density: ''
             test-class: ''
             artifact: helmetguard-incident-regression
           - suite: motion-regression
             disable-animations: false
+            animation-scale: '1'
+            font-scale: '1.0'
+            display-density: ''
             test-class: com.helmet.guard.UiMotionTest
             artifact: helmetguard-motion-regression
+          - suite: accessibility-regression
+            disable-animations: true
+            animation-scale: '0'
+            font-scale: '1.6'
+            display-density: '540'
+            test-class: com.helmet.guard.UiAccessibilityTest
+            artifact: helmetguard-accessibility-regression
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v5
@@ -119,6 +132,9 @@ jobs:
           script: bash scripts/android-regression.sh
         env:
           UI_TEST_CLASS: ${{ matrix.test-class }}
+          UI_MOTION_SCALE: ${{ matrix.animation-scale }}
+          UI_FONT_SCALE: ${{ matrix.font-scale }}
+          UI_DISPLAY_DENSITY: ${{ matrix.display-density }}
       - name: Upload device test reports
         if: always()
         uses: actions/upload-artifact@v4

@@ -1,12 +1,10 @@
 package com.helmet.guard.ui.screens
 
 import android.content.Intent
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +29,8 @@ import androidx.compose.material.icons.outlined.Sensors
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -47,9 +47,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.helmet.guard.AppGraph
@@ -111,20 +111,14 @@ fun HomeScreen(
         item {
             Card(
                 shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.16f))
+                colors = CardDefaults.cardColors(containerColor = Color.Transparent)
             ) {
-                Box(Modifier.fillMaxWidth()) {
-                    // Static vector decoration: no background loop, image download or false scan.
-                    Canvas(Modifier.matchParentSize()) {
-                        val center = Offset(size.width + 8.dp.toPx(), 12.dp.toPx())
-                        listOf(60.dp, 100.dp, 140.dp).forEach {
-                            drawCircle(GuardBlue.copy(alpha = 0.06f), it.toPx(), center, style = Stroke(1.dp.toPx()))
-                        }
-                    }
+                Box(Modifier.fillMaxWidth().background(
+                    Brush.linearGradient(listOf(Color(0xFF123C91), GuardBlue, Color(0xFF1688B5)))
+                )) {
                     Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Icon(Icons.Outlined.HealthAndSafety, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(32.dp))
+                            Icon(Icons.Outlined.HealthAndSafety, null, tint = Color.White, modifier = Modifier.size(32.dp))
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text(
                                     when {
@@ -132,25 +126,26 @@ fun HomeScreen(
                                         dataReady -> "头盔在线 · 安全监测中"
                                         monitoring -> "守护已启动，等待头盔"
                                         else -> "准备好，再出发"
-                                    }, color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    }, color = Color.White,
                                     style = MaterialTheme.typography.titleLarge
                                 )
                                 Text(
                                     if (monitoring) connection.message else "开启守护后连接头盔，开始接收骑行数据。",
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    color = Color.White.copy(alpha = 0.9f),
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                             }
                         }
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            StatusPill(if (dataReady) "蓝牙数据就绪" else "等待蓝牙数据", if (dataReady) GuardGreen else MaterialTheme.colorScheme.onPrimaryContainer)
-                            if (recording.isRecording) StatusPill("记录 ${recording.sampleCount} 帧", GuardRed)
+                            HeroStatusPill(if (dataReady) "蓝牙数据就绪" else "等待蓝牙数据")
+                            if (recording.isRecording) HeroStatusPill("记录 ${recording.sampleCount} 帧")
                         }
                         Button(
                             onClick = {
                                 if (monitoring) stopMonitoring()
                                 else requestPermissions { startMonitoring() }
-                            }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
+                            }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFF17499F))
                         ) { Text(if (monitoring) "结束本次守护" else "开启骑行守护") }
                     }
                 }
@@ -239,4 +234,16 @@ fun HomeScreen(
         )
     }
 
+}
+
+/** Opaque white keeps status text legible at every stop of the brand gradient. */
+@Composable
+private fun HeroStatusPill(text: String) {
+    Surface(color = Color.White, contentColor = Color(0xFF17499F), shape = RoundedCornerShape(12.dp)) {
+        Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(6.dp).background(Color(0xFF17499F), CircleShape))
+            Spacer(Modifier.size(6.dp))
+            Text(text, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+        }
+    }
 }
