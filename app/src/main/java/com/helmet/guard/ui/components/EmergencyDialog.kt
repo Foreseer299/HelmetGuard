@@ -10,7 +10,12 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BasicAlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -48,7 +53,7 @@ fun CountdownIndicator(eventId: Long?, secondsLeft: Int, color: Color, modifier:
     val initialSeconds = rememberSaveable(eventId) { secondsLeft.coerceAtLeast(1) }
     val target = (secondsLeft.toFloat() / initialSeconds).coerceIn(0f, 1f)
     val progress by key(eventId) { animateFloatAsState(target, tween(180), label = "countdownProgress") }
-    val ringSize = 104.dp * LocalDensity.current.fontScale.coerceIn(1f, 1.6f)
+    val ringSize = 104.dp * LocalDensity.current.fontScale.coerceIn(1f, 1.2f)
     Box(
         modifier.size(ringSize).testTag("countdown_indicator").semantics(mergeDescendants = true) {
             // Expose actual coordinator progress immediately, independently of decoration.
@@ -68,44 +73,56 @@ fun CountdownIndicator(eventId: Long?, secondsLeft: Int, color: Color, modifier:
 }
 
 /** Kept outside NavHost so navigation never postpones emergency actions. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EmergencyDialog(graph: AppGraph) {
     val emergency by graph.incidents.state.collectAsState()
     if (emergency.stage != EmergencyStage.COUNTDOWN) return
-    AlertDialog(
-        onDismissRequest = {},
-        modifier = Modifier.testTag("emergency_dialog"),
-        icon = {
-            CountdownIndicator(emergency.eventId, emergency.secondsLeft,
-                if (emergency.isSimulation) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
-        },
-        title = { Text(if (emergency.isSimulation) "模拟事故演练" else "你现在安全吗？") },
-        text = {
-            Column(
-                Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(emergency.detail)
-                Text(
-                    if (emergency.isSimulation) "本次只验证流程，不会定位或发送短信。" else "安全时请取消；如需帮助，可立即求救。",
-                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { graph.incidents.cancel(emergency.eventId) },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("cancel_emergency"),
-                colors = ButtonDefaults.buttonColors(containerColor = GuardGreen, contentColor = Color.White)
-            ) { Text("我安全，取消报警") }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = { graph.incidents.sendNow(emergency.eventId) },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("send_emergency_now")
-            ) {
-                Text(if (emergency.isSimulation) "立即完成演练" else "立即求救", color = MaterialTheme.colorScheme.error)
+    BasicAlertDialog(onDismissRequest = {}, modifier = Modifier.testTag("emergency_dialog")) {
+        Surface(
+            Modifier.fillMaxWidth().heightIn(max = 560.dp),
+            shape = RoundedCornerShape(26.dp),
+            color = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        ) {
+            Column {
+                // Measure actions first. Only explanatory content scrolls when space is
+                // tight, so enlarged labels cannot lose their height to the ring or title.
+                Column(
+                    Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        CountdownIndicator(emergency.eventId, emergency.secondsLeft,
+                            if (emergency.isSimulation) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+                    }
+                    Text(if (emergency.isSimulation) "模拟事故演练" else "你现在安全吗？", style = MaterialTheme.typography.headlineSmall)
+                    Text(emergency.detail, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        if (emergency.isSimulation) "本次只验证流程，不会定位或发送短信。" else "安全时请取消；如需帮助，可立即求救。",
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Column(
+                    Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Button(
+                        onClick = { graph.incidents.cancel(emergency.eventId) },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("cancel_emergency"),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = GuardGreen, contentColor = Color.White)
+                    ) { Text("我安全，取消报警") }
+                    TextButton(
+                        onClick = { graph.incidents.sendNow(emergency.eventId) },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("send_emergency_now"),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 12.dp)
+                    ) {
+                        Text(if (emergency.isSimulation) "立即完成演练" else "立即求救", color = MaterialTheme.colorScheme.error)
+                    }
+                }
             }
         }
-    )
+    }
 }

@@ -9,6 +9,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -77,8 +79,19 @@ class UiPreviewTest {
 
     private fun capture(name: String) {
         compose.waitForIdle()
-        saveUiPreview(context, name,
-            requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()))
+        captureUiPreview(context, name)
+    }
+
+    private fun selectTab(route: String) {
+        compose.onNodeWithTag("nav_$route").performClick()
+        compose.waitForIdle()
+    }
+
+    /** Lazy items must be created by the container before selecting their text. */
+    private fun scrollPageTo(text: String) {
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText(text))
+        compose.waitForIdle()
+        compose.onNodeWithText(text).assertIsDisplayed()
     }
 
     private fun assertTextFits(text: String) {
@@ -94,16 +107,16 @@ class UiPreviewTest {
 
     @Test fun deviceEmptyPreview() {
         show()
-        compose.onNodeWithTag("nav_device").performClick()
+        selectTab("device")
         compose.onNodeWithText("我的头盔").assertIsDisplayed()
         capture("device-empty.png")
-        compose.onNodeWithText("找不到头盔？").performScrollTo().assertIsDisplayed()
+        scrollPageTo("找不到头盔？")
         capture("device-empty-help.png")
     }
 
     @Test fun historyEmptyPreview() {
         show()
-        compose.onNodeWithTag("nav_history").performClick()
+        selectTab("history")
         compose.waitUntil(5_000) { compose.onAllNodes(hasText("暂无参数记录")).fetchSemanticsNodes().isNotEmpty() }
         compose.waitUntil(5_000) { compose.onAllNodes(hasText("事故事件 0")).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("暂无参数记录").assertIsDisplayed()
@@ -118,29 +131,34 @@ class UiPreviewTest {
         val logicalDensity = context.resources.displayMetrics.widthPixels / 320f
         val width = compose.onNodeWithTag("guard_navigation").fetchSemanticsNode().boundsInRoot.width
         assertEquals(320f, width / logicalDensity, 1f)
+        capture("home-320dp-font160-initial.png")
         listOf("守护", "设备", "数据", "记录", "设置").forEach { assertTextFits(it) }
-        compose.onNodeWithText("开启骑行守护").performScrollTo().assertIsDisplayed()
-        assertTextFits("开启骑行守护")
+        scrollPageTo("开启骑行守护")
         capture("home-320dp-font160.png")
-        compose.onNodeWithText("手动触发紧急求救").performScrollTo().assertIsDisplayed()
-        assertTextFits("手动触发紧急求救")
+        assertTextFits("开启骑行守护")
+        scrollPageTo("手动触发紧急求救")
         capture("home-320dp-font160-actions.png")
-        compose.onNodeWithTag("nav_device").performClick()
-        compose.onNodeWithText("扫描附近头盔").performScrollTo().assertIsDisplayed()
-        assertTextFits("扫描附近头盔")
+        assertTextFits("手动触发紧急求救")
+        selectTab("device")
+        scrollPageTo("扫描附近头盔")
         capture("device-320dp-font160.png")
-        compose.onNodeWithTag("nav_telemetry").performClick()
+        assertTextFits("扫描附近头盔")
+        selectTab("telemetry")
         compose.onNodeWithText("实时数据").assertIsDisplayed()
         capture("telemetry-320dp-font160.png")
     }
 
     @Test fun narrowSettingsAndContactEditorCanScroll() {
         show(narrowLargeText = true)
-        compose.onNodeWithTag("nav_settings").performClick()
+        selectTab("settings")
         compose.onNodeWithText("可靠性中心").assertIsDisplayed()
         capture("settings-320dp-font160.png")
-        compose.onNodeWithText("紧急联系人").performScrollTo().performClick()
-        compose.onNodeWithText(" 添加联系人").performScrollTo().performClick()
+        scrollPageTo("紧急联系人")
+        compose.onNodeWithText("紧急联系人").performClick()
+        compose.waitForIdle()
+        scrollPageTo(" 添加联系人")
+        compose.onNodeWithText(" 添加联系人").performClick()
+        compose.waitForIdle()
         compose.onNodeWithText("姓名", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("发送优先级", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("取消").assertIsDisplayed()
@@ -149,7 +167,7 @@ class UiPreviewTest {
 
     @Test fun narrowCountdownKeepsBothActionsReadable() = runBlocking<Unit> {
         show(narrowLargeText = true)
-        compose.onNodeWithTag("nav_settings").performClick()
+        selectTab("settings")
         graph.incidents.trigger(
             IncidentCandidate(System.currentTimeMillis(), System.currentTimeMillis(), IncidentSource.PHONE_ALGORITHM,
                 0.94f, DetectionFeatures(6.42f, 731f, 38f), isSimulation = true), 30
@@ -157,9 +175,9 @@ class UiPreviewTest {
         compose.waitUntil(5_000) { graph.incidents.state.value.stage == EmergencyStage.COUNTDOWN }
         compose.onNodeWithTag("cancel_emergency").assertIsDisplayed()
         compose.onNodeWithTag("send_emergency_now").assertIsDisplayed()
+        capture("countdown-320dp-font160.png")
         assertTextFits("我安全，取消报警")
         assertTextFits("立即完成演练")
-        capture("countdown-320dp-font160.png")
         compose.onNodeWithTag("cancel_emergency").performClick()
         compose.waitUntil(5_000) { graph.incidents.state.value.stage == EmergencyStage.CANCELLED }
         compose.onNodeWithText("可靠性中心").assertIsDisplayed()

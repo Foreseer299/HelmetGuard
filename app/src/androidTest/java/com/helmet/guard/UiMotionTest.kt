@@ -79,8 +79,7 @@ class UiMotionTest {
             .config[SemanticsProperties.ProgressBarRangeInfo]
         assertEquals(0.5f, renderedRange.current, 0.001f)
         compose.onNodeWithText("10").assertIsDisplayed()
-        saveUiPreview(context, "motion-countdown-half.png",
-            requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()))
+        captureUiPreview(context, "motion-countdown-half.png")
         compose.runOnIdle { event = 102; seconds = 5 }
         compose.mainClock.advanceTimeBy(400)
         compose.waitForIdle()
@@ -127,8 +126,7 @@ class UiMotionTest {
         compose.onNodeWithTag("cancel_emergency").assertIsDisplayed()
         compose.onNodeWithTag("send_emergency_now").assertIsDisplayed()
         val eventId = requireNotNull(graph.incidents.state.value.eventId)
-        saveUiPreview(context, "motion-global-countdown-history.png",
-            requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()))
+        captureUiPreview(context, "motion-global-countdown-history.png")
         compose.onNodeWithTag("cancel_emergency").performClick()
         compose.waitUntil(5_000) { graph.incidents.state.value.stage == EmergencyStage.CANCELLED }
         compose.onNodeWithTag("emergency_dialog").assertDoesNotExist()
@@ -136,7 +134,6 @@ class UiMotionTest {
         assertEquals(emptyList<Any>(), graph.database.smsParts().forEvent(eventId))
         compose.onNodeWithTag("nav_home").performClick()
         compose.onNodeWithText("骑行守护").assertIsDisplayed()
-        saveUiPreview(context, "motion-navigation-home.png",
-            requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()))
+        captureUiPreview(context, "motion-navigation-home.png")
     }
 }

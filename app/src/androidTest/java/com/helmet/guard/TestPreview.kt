@@ -6,6 +6,19 @@ import android.graphics.Bitmap
 import android.os.Build
 import android.provider.MediaStore
 import java.io.File
+import android.os.SystemClock
+import androidx.test.platform.app.InstrumentationRegistry
+
+/** Compose idle can precede the native window transition and compositor presentation. */
+internal fun captureUiPreview(context: Context, name: String) {
+    val instrumentation = InstrumentationRegistry.getInstrumentation()
+    instrumentation.waitForIdleSync()
+    // Test-only wait, longer than our 180/200 ms transitions and the native dialog fade.
+    // It does not delay app actions, the coordinator clock, or change screenshot pixels.
+    SystemClock.sleep(400)
+    instrumentation.waitForIdleSync()
+    saveUiPreview(context, name, requireNotNull(instrumentation.uiAutomation.takeScreenshot()))
+}
 
 /** Public test images survive Gradle's automatic uninstall so CI can collect them. */
 internal fun saveUiPreview(context: Context, name: String, bitmap: Bitmap) {
