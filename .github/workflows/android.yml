@@ -82,8 +82,21 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
 
   incident-regression:
+    name: ${{ matrix.suite }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: incident-regression
+            disable-animations: true
+            test-class: ''
+            artifact: helmetguard-incident-regression
+          - suite: motion-regression
+            disable-animations: false
+            test-class: com.helmet.guard.UiMotionTest
+            artifact: helmetguard-motion-regression
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v5
@@ -102,13 +115,15 @@ jobs:
           api-level: 35
           arch: x86_64
           profile: pixel_2
-          disable-animations: true
+          disable-animations: ${{ matrix.disable-animations }}
           script: bash scripts/android-regression.sh
+        env:
+          UI_TEST_CLASS: ${{ matrix.test-class }}
       - name: Upload device test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: helmetguard-incident-regression
+          name: ${{ matrix.artifact }}
           path: |
             app/build/reports/androidTests/
             app/build/outputs/androidTest-results/

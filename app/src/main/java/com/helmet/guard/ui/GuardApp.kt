@@ -1,7 +1,14 @@
 package com.helmet.guard.ui
 
 import android.content.Intent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.platform.testTag
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Dataset
 import androidx.compose.material.icons.outlined.History
@@ -21,6 +28,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -64,10 +72,22 @@ fun GuardApp(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             if (route in destinations.map { it.route }) {
-                NavigationBar {
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tonalElevation = 0.dp
+                ) {
                     destinations.forEach { item ->
                         NavigationBarItem(
+                            modifier = Modifier.testTag("nav_${item.route}"),
                             selected = route == item.route,
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                selectedTextColor = MaterialTheme.colorScheme.primary,
+                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
                             onClick = {
                                 navController.navigate(item.route) {
                                     popUpTo(navController.graph.findStartDestination().id) { saveState = true }
@@ -83,7 +103,13 @@ fun GuardApp(
             }
         }
     ) { padding ->
-        NavHost(navController, "home", Modifier.padding(padding)) {
+        NavHost(
+            navController, "home", Modifier.padding(padding).consumeWindowInsets(padding).testTag("guard_navigation"),
+            enterTransition = { fadeIn(tween(180)) },
+            exitTransition = { fadeOut(tween(160)) },
+            popEnterTransition = { fadeIn(tween(180)) },
+            popExitTransition = { fadeOut(tween(160)) }
+        ) {
             composable("home") {
                 HomeScreen(graph, requestCorePermissions, startMonitoring, stopMonitoring, { navController.navigate("telemetry") }, { navController.navigate("contacts") }, runServiceAction)
             }

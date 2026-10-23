@@ -1,16 +1,12 @@
 package com.helmet.guard
 
 import android.content.Context
-import android.graphics.Bitmap
-import androidx.compose.ui.graphics.asAndroidBitmap
-import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isRoot
 import com.helmet.guard.ui.components.EmergencyDialog
-import java.io.File
-import androidx.compose.material3.MaterialTheme
+import com.helmet.guard.ui.theme.HelmetGuardTheme
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -73,7 +69,7 @@ class IncidentRegressionTest {
             101, now, now, "HELMET_HARDWARE", "CANCELLED", 0.94f,
             6.42f, 731f, 38f, 0, now, null, null, null, null, null, "用户确认安全", false
         ))
-        compose.setContent { MaterialTheme { HistoryScreen(graph) } }
+        compose.setContent { HelmetGuardTheme { HistoryScreen(graph) } }
         compose.waitUntil(5_000) {
             compose.onAllNodes(androidx.compose.ui.test.hasText("事故事件 1")).fetchSemanticsNodes().isNotEmpty()
         }
@@ -134,7 +130,7 @@ class IncidentRegressionTest {
     }
 
     @Test fun globalCountdownIsActionableOutsideHome() = runBlocking<Unit> {
-        compose.setContent { MaterialTheme { EmergencyDialog(graph) } }
+        compose.setContent { HelmetGuardTheme { EmergencyDialog(graph) } }
         graph.incidents.trigger(hardware().copy(hardware = null, isSimulation = true), 30)
         awaitCondition { graph.incidents.state.value.stage == EmergencyStage.COUNTDOWN }
         compose.onNodeWithText("模拟事故演练").assertIsDisplayed()

@@ -3,7 +3,9 @@ package com.helmet.guard.ui.screens
 import android.content.Intent
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Arrangement
@@ -40,7 +42,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.helmet.guard.AppGraph
@@ -49,12 +50,15 @@ import com.helmet.guard.domain.RecordingChannels
 import com.helmet.guard.domain.RecordingLabel
 import com.helmet.guard.service.HelmetGuardService
 import com.helmet.guard.ui.components.InfoCard
+import com.helmet.guard.ui.components.PageHeader
+import com.helmet.guard.ui.components.DetailValue
 import com.helmet.guard.ui.components.MiniLineChart
 import com.helmet.guard.ui.components.SectionTitle
 import com.helmet.guard.ui.components.StatusPill
 import com.helmet.guard.ui.theme.GuardBlue
 import com.helmet.guard.ui.theme.GuardCyan
 import com.helmet.guard.ui.theme.GuardGreen
+import com.helmet.guard.ui.theme.GuardOrange
 import com.helmet.guard.ui.theme.GuardRed
 import kotlinx.coroutines.launch
 
@@ -85,37 +89,28 @@ fun TelemetryScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            Spacer(Modifier.height(8.dp))
-            SectionTitle("实时数据", "最近 120 帧 · 实时滚动曲线") {
-                StatusPill(if (recording.isRecording) "记录 ${recording.sampleCount} 帧" else if (connection.isReady) "实时" else "等待设备", if (recording.isRecording) GuardRed else GuardGreen)
+            PageHeader("实时数据", if (connection.isReady) "最近 120 帧 · 按样本更新" else if (sample != null) "当前未连接头盔 · 显示最近读数或模拟样本" else "连接头盔后查看，或在下方运行模拟实验") {
+                StatusPill(if (recording.isRecording) "记录 ${recording.sampleCount} 帧" else if (connection.isReady) "实时" else "未连接设备", if (recording.isRecording) GuardRed else if (connection.isReady) GuardGreen else GuardOrange)
             }
         }
         item {
             InfoCard {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    AxisValue("AX", sample?.ax, "g", GuardBlue)
-                    AxisValue("AY", sample?.ay, "g", GuardCyan)
-                    AxisValue("AZ", sample?.az, "g", Color(0xFF8B5CF6))
-                    AxisValue("合计", sample?.accelerationG, "g", GuardRed)
-                }
+                Text("加速度", style = MaterialTheme.typography.titleMedium)
+                AxisReadings(listOf("AX" to sample?.ax, "AY" to sample?.ay, "AZ" to sample?.az, "合计" to sample?.accelerationG), "g")
                 MiniLineChart(accHistory, GuardBlue, Modifier.fillMaxWidth().height(130.dp))
             }
         }
         item {
             InfoCard {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    AxisValue("GX", sample?.gx, "°/s", GuardBlue)
-                    AxisValue("GY", sample?.gy, "°/s", GuardCyan)
-                    AxisValue("GZ", sample?.gz, "°/s", Color(0xFF8B5CF6))
-                    AxisValue("合计", sample?.angularSpeedDps, "°/s", GuardRed)
-                }
+                Text("角速度", style = MaterialTheme.typography.titleMedium)
+                AxisReadings(listOf("GX" to sample?.gx, "GY" to sample?.gy, "GZ" to sample?.gz, "合计" to sample?.angularSpeedDps), "°/s")
                 MiniLineChart(gyroHistory, GuardCyan, Modifier.fillMaxWidth().height(130.dp))
             }
         }
         item {
             InfoCard {
                 SectionTitle("姿态与检测特征", detector.label)
-                FeatureRow("横滚 / 俯仰 / 航向", "%.1f° / %.1f° / %.1f°".format(sample?.roll ?: 0f, sample?.pitch ?: 0f, sample?.yaw ?: 0f))
+                FeatureRow("横滚 / 俯仰 / 航向", sample?.let { "%.1f° / %.1f° / %.1f°".format(it.roll, it.pitch, it.yaw) } ?: "--")
                 FeatureRow("冲击峰值", "%.2f g".format(detector.features.peakAccelerationG))
                 FeatureRow("角速度峰值", "%.0f °/s".format(detector.features.peakAngularSpeedDps))
                 FeatureRow("姿态变化", "%.1f°".format(detector.features.orientationChangeDeg))
@@ -131,7 +126,7 @@ fun TelemetryScreen(
                     colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = GuardRed)
                 ) { Icon(Icons.Outlined.Stop, null); Spacer(Modifier.padding(4.dp)); Text("停止并保存记录") }
             } else {
-                Button(onClick = { showRecordDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = { showRecordDialog = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                     Icon(Icons.Outlined.Circle, null); Spacer(Modifier.padding(4.dp)); Text("开始参数记录")
                 }
             }
@@ -225,18 +220,24 @@ private fun ChannelCheck(label: String, checked: Boolean, change: (Boolean) -> U
 }
 
 @Composable
-private fun AxisValue(label: String, value: Float?, unit: String, color: Color) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, style = MaterialTheme.typography.bodyMedium, color = color, fontWeight = FontWeight.Bold)
-        Text(if (value == null) "--" else "%.2f".format(value), fontWeight = FontWeight.SemiBold)
-        Text(unit, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun AxisReadings(values: List<Pair<String, Float?>>, unit: String) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val columns = if (maxWidth < 320.dp || LocalDensity.current.fontScale > 1.2f) 2 else 4
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            values.chunked(columns).forEach { group ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    group.forEach { (label, value) ->
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                            Text(if (value == null) "--" else "%.2f".format(value), style = MaterialTheme.typography.titleMedium)
+                            Text(unit, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun FeatureRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, fontWeight = FontWeight.SemiBold)
-    }
-}
+private fun FeatureRow(label: String, value: String) { DetailValue(label, value) }

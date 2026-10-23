@@ -1,7 +1,12 @@
 package com.helmet.guard.ui.screens
 
 import android.content.Intent
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,7 +33,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -44,16 +48,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.helmet.guard.AppGraph
-import com.helmet.guard.domain.ConnectionPhase
 import com.helmet.guard.domain.EmergencyStage
 import com.helmet.guard.service.HelmetGuardService
 import com.helmet.guard.ui.components.InfoCard
 import com.helmet.guard.ui.components.MetricCard
+import com.helmet.guard.ui.components.MetricPair
+import com.helmet.guard.ui.components.PageHeader
 import com.helmet.guard.ui.components.SectionTitle
 import com.helmet.guard.ui.components.StatusPill
 import com.helmet.guard.ui.theme.GuardBlue
@@ -62,6 +67,7 @@ import com.helmet.guard.ui.theme.GuardGreen
 import com.helmet.guard.ui.theme.GuardOrange
 import com.helmet.guard.ui.theme.GuardRed
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun HomeScreen(
     graph: AppGraph,
@@ -90,94 +96,100 @@ fun HomeScreen(
         oemConfirmed
     )
     val failedChecks = checks.count { it.required && !it.passed }
+    val dataReady = monitoring && connection.isReady && sample != null
+    val visibleSample = sample.takeIf { dataReady }
 
     LazyColumn(
         Modifier.statusBarsPadding().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("骑行守护", style = MaterialTheme.typography.headlineMedium)
-                    Text("每一程，都安心抵达", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                StatusPill(if (monitoring) "守护中" else "未启动", if (monitoring) GuardGreen else GuardOrange)
+            PageHeader("骑行守护", "连接头盔，守护每一次出发") {
+                StatusPill(if (monitoring) "守护服务已启动" else "未启动", if (monitoring) GuardGreen else GuardOrange)
             }
         }
         item {
-            Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = Color.Transparent)) {
-                Column(
-                    Modifier.fillMaxWidth().background(
-                        Brush.linearGradient(listOf(Color(0xFF123C91), GuardBlue, Color(0xFF1688B5)))
-                    ).padding(22.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(52.dp).background(Color.White.copy(alpha = 0.16f), CircleShape), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Outlined.HealthAndSafety, null, tint = Color.White, modifier = Modifier.size(29.dp))
-                        }
-                        Spacer(Modifier.size(14.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                when {
-                                    emergency.stage in setOf(EmergencyStage.COUNTDOWN, EmergencyStage.LOCATING, EmergencyStage.SENDING) -> "正在处理紧急事件"
-                                    connection.phase == ConnectionPhase.READY -> "头盔在线 · 安全监测中"
-                                    monitoring -> "守护服务运行中"
-                                    else -> "启动守护后连接头盔"
-                                }, color = Color.White, fontWeight = FontWeight.Bold
-                            )
-                            Text(connection.message, color = Color.White.copy(alpha = 0.78f), style = MaterialTheme.typography.bodyMedium)
+            Card(
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.16f))
+            ) {
+                Box(Modifier.fillMaxWidth()) {
+                    // Static vector decoration: no background loop, image download or false scan.
+                    Canvas(Modifier.matchParentSize()) {
+                        val center = Offset(size.width + 8.dp.toPx(), 12.dp.toPx())
+                        listOf(60.dp, 100.dp, 140.dp).forEach {
+                            drawCircle(GuardBlue.copy(alpha = 0.06f), it.toPx(), center, style = Stroke(1.dp.toPx()))
                         }
                     }
-                    Spacer(Modifier.height(22.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        StatusPill(if (connection.isReady) "蓝牙数据就绪" else "等待蓝牙数据", if (connection.isReady) GuardCyan else Color.White)
-                        if (recording.isRecording) StatusPill("记录 ${recording.sampleCount} 帧", GuardRed)
+                    Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Icon(Icons.Outlined.HealthAndSafety, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(32.dp))
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    when {
+                                        emergency.stage in setOf(EmergencyStage.COUNTDOWN, EmergencyStage.LOCATING, EmergencyStage.SENDING) -> "正在处理紧急事件"
+                                        dataReady -> "头盔在线 · 安全监测中"
+                                        monitoring -> "守护已启动，等待头盔"
+                                        else -> "准备好，再出发"
+                                    }, color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    style = MaterialTheme.typography.titleLarge
+                                )
+                                Text(
+                                    if (monitoring) connection.message else "开启守护后连接头盔，开始接收骑行数据。",
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            StatusPill(if (dataReady) "蓝牙数据就绪" else "等待蓝牙数据", if (dataReady) GuardGreen else MaterialTheme.colorScheme.onPrimaryContainer)
+                            if (recording.isRecording) StatusPill("记录 ${recording.sampleCount} 帧", GuardRed)
+                        }
+                        Button(
+                            onClick = {
+                                if (monitoring) stopMonitoring()
+                                else requestPermissions { startMonitoring() }
+                            }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
+                        ) { Text(if (monitoring) "结束本次守护" else "开启骑行守护") }
                     }
-                    Spacer(Modifier.height(18.dp))
-                    Button(
-                        onClick = {
-                            if (monitoring) stopMonitoring()
-                            else requestPermissions { startMonitoring() }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFF17499F))
-                    ) { Text(if (monitoring) "结束本次守护" else "开启骑行守护") }
                 }
             }
         }
+        item { SectionTitle("当前读数", if (dataReady) "来自头盔的最新数据" else "设备数据就绪后显示；离线时不作安全判断") }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                MetricCard(Icons.Outlined.Speed, "合加速度", sample?.let { String.format("%.2f", it.accelerationG) } ?: "--", "g", GuardBlue, Modifier.weight(1f))
-                MetricCard(Icons.Outlined.QueryStats, "角速度", sample?.let { String.format("%.0f", it.angularSpeedDps) } ?: "--", "°/s", GuardCyan, Modifier.weight(1f))
-            }
+            MetricPair(
+                first = { MetricCard(Icons.Outlined.Speed, "合加速度", visibleSample?.let { String.format("%.2f", it.accelerationG) } ?: "--", "g", GuardBlue, it) },
+                second = { MetricCard(Icons.Outlined.QueryStats, "角速度", visibleSample?.let { String.format("%.0f", it.angularSpeedDps) } ?: "--", "°/s", GuardCyan, it) }
+            )
         }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                MetricCard(Icons.Outlined.Battery5Bar, "头盔电量", sample?.takeIf { it.batteryValid }?.batteryPercent?.toString() ?: "--", if (sample?.batteryValid == true) "%" else "暂无数据", GuardGreen, Modifier.weight(1f))
-                MetricCard(Icons.Outlined.Sensors, "事故置信度", "${(detector.confidence * 100).toInt()}", "%", GuardOrange, Modifier.weight(1f))
-            }
+            MetricPair(
+                first = { MetricCard(Icons.Outlined.Battery5Bar, "头盔电量", visibleSample?.takeIf { it.batteryValid }?.batteryPercent?.toString() ?: "--", "%", GuardGreen, it) },
+                second = { MetricCard(Icons.Outlined.Sensors, "事故置信度", if (dataReady) "${(detector.confidence * 100).toInt()}" else "--", "% · 检测评分", GuardOrange, it) }
+            )
         }
         item {
             InfoCard {
-                SectionTitle("检测引擎", detector.label) { StatusPill(when (detector.stage) {
+                SectionTitle("检测引擎", if (dataReady) detector.label else "等待有效的头盔数据") { StatusPill(if (!monitoring) "未启动" else if (!dataReady) "等待数据" else when (detector.stage) {
                     com.helmet.guard.domain.DetectorStage.IDLE -> "监测中"
                     com.helmet.guard.domain.DetectorStage.CANDIDATE, com.helmet.guard.domain.DetectorStage.OBSERVING -> "复核冲击"
                     com.helmet.guard.domain.DetectorStage.VERIFYING_STILLNESS -> "确认状态"
                     com.helmet.guard.domain.DetectorStage.COOLDOWN -> "事故处理中"
-                }, if (detector.confidence > 0.65f) GuardRed else GuardGreen) }
+                }, if (!dataReady) GuardOrange else if (detector.confidence > 0.65f) GuardRed else GuardGreen) }
                 LinearProgressIndicator(
-                    progress = { detector.confidence },
+                    progress = { if (dataReady) detector.confidence else 0f },
                     modifier = Modifier.fillMaxWidth().height(7.dp).clip(CircleShape),
                     color = if (detector.confidence > 0.65f) GuardRed else GuardBlue
                 )
                 Text(
-                    "冲击峰值 %.2fg · 旋转 %.0f°/s · 姿态变化 %.0f°".format(
+                    if (!dataReady) "头盔连接并启动守护后，将显示冲击与姿态特征。" else "冲击峰值 %.2fg · 旋转 %.0f°/s · 姿态变化 %.0f°".format(
                         detector.features.peakAccelerationG,
                         detector.features.peakAngularSpeedDps,
                         detector.features.orientationChangeDeg
                     ), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Text("置信度是检测器评分，不代表事故发生概率。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(onClick = openTelemetry) { Text("查看实时参数与实验记录 →") }
             }
         }
@@ -191,7 +203,7 @@ fun HomeScreen(
                         Text("${contacts.count { it.enabled }} 位启用联系人 · ${graph.reliability.guide().systemName}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                OutlinedButton(onClick = openContacts, modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = openContacts, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                     Icon(Icons.Outlined.ContactEmergency, null)
                     Spacer(Modifier.size(8.dp))
                     Text("管理紧急联系人")
@@ -199,7 +211,7 @@ fun HomeScreen(
             }
         }
         item {
-            OutlinedButton(onClick = { confirmSos = true }, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = { confirmSos = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                 Icon(Icons.Outlined.WarningAmber, null, tint = GuardRed)
                 Spacer(Modifier.size(8.dp))
                 Text("手动触发紧急求救", color = GuardRed)

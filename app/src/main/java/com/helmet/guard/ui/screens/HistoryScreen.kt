@@ -18,6 +18,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material.icons.outlined.Sms
@@ -50,8 +53,10 @@ import com.helmet.guard.data.db.AccidentEntity
 import com.helmet.guard.data.db.TelemetrySampleEntity
 import com.helmet.guard.domain.RecordingSession
 import com.helmet.guard.ui.components.InfoCard
+import com.helmet.guard.ui.components.PageHeader
+import com.helmet.guard.ui.components.EmptyState
+import com.helmet.guard.ui.components.DetailValue
 import com.helmet.guard.ui.components.MiniLineChart
-import com.helmet.guard.ui.components.SectionTitle
 import com.helmet.guard.ui.components.StatusPill
 import com.helmet.guard.ui.theme.GuardBlue
 import com.helmet.guard.ui.theme.GuardGreen
@@ -62,6 +67,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun HistoryScreen(graph: AppGraph) {
     val sessions by graph.recorder.sessions.collectAsState()
@@ -79,11 +85,10 @@ fun HistoryScreen(graph: AppGraph) {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
-            Spacer(Modifier.height(8.dp))
-            SectionTitle("历史记录", "实验数据与求救链路全程可追溯")
+            PageHeader("历史记录", "实验数据与求救链路全程可追溯")
         }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(tab == 0, { tab = 0 }, label = { Text("参数记录 ${sessions.size}") })
                 FilterChip(tab == 1, { tab = 1 }, label = { Text("事故事件 ${accidents.size}") })
             }
@@ -102,8 +107,8 @@ fun HistoryScreen(graph: AppGraph) {
                             Text(session.label.displayName, fontWeight = FontWeight.Bold)
                             Text(formatTime(session.startedAtMs), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        StatusPill(if (session.endedAtMs == null) "记录中" else "${session.sampleCount} 帧", if (session.endedAtMs == null) GuardRed else GuardGreen)
                     }
+                    StatusPill(if (session.endedAtMs == null) "记录中" else "${session.sampleCount} 帧", if (session.endedAtMs == null) GuardRed else GuardGreen)
                     if (session.notes.isNotBlank()) Text(session.notes)
                     Text("${session.deviceName} · ${channelText(session)}${if (session.isSimulation) " · 模拟" else ""}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row {
@@ -112,7 +117,7 @@ fun HistoryScreen(graph: AppGraph) {
                                 exportSession(context, graph, session.id)
                             }
                         }, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.Download, null); Text(" 导出 CSV") }
-                        IconButton(onClick = { scope.launch { graph.recorder.delete(session.id) } }) { Icon(Icons.Outlined.DeleteOutline, null, tint = GuardRed) }
+                        IconButton(onClick = { scope.launch { graph.recorder.delete(session.id) } }) { Icon(Icons.Outlined.DeleteOutline, "删除参数记录", tint = GuardRed) }
                     }
                 }
             }
@@ -127,8 +132,8 @@ fun HistoryScreen(graph: AppGraph) {
                             Text(if (accident.isSimulation) "模拟事故演练" else "疑似事故事件", fontWeight = FontWeight.Bold)
                             Text(formatTime(accident.detectedAtMs), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        StatusPill(incidentStageText(accident.stage), stageColor(accident.stage))
                     }
+                    StatusPill(incidentStageText(accident.stage), stageColor(accident.stage))
                     Text(accident.detail)
                     Text(incidentMetrics(accident.confidence, accident.peakAccelerationG, accident.orientationChangeDeg), style = MaterialTheme.typography.bodyMedium)
                     val latitude = accident.latitude
@@ -212,8 +217,8 @@ private fun AccidentDetailDialog(graph: AppGraph, accident: AccidentEntity, dism
     )
 }
 
-@Composable private fun EmptyHistory(title: String, detail: String) { InfoCard { Text(title, fontWeight = FontWeight.Bold); Text(detail, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
-@Composable private fun FeatureLine(label: String, value: String) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(value, fontWeight = FontWeight.SemiBold) } }
+@Composable private fun EmptyHistory(title: String, detail: String) { EmptyState(Icons.Outlined.History, title, detail) }
+@Composable private fun FeatureLine(label: String, value: String) { DetailValue(label, value) }
 
 private fun formatTime(ms: Long): String = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA).format(Date(ms))
 private fun duration(session: RecordingSession): String = session.endedAtMs?.let { "${((it - session.startedAtMs) / 1_000).coerceAtLeast(0)} 秒" } ?: "进行中"

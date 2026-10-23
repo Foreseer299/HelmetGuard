@@ -1,12 +1,15 @@
 package com.helmet.guard.ui.screens
 
-import android.content.Intent
-import android.provider.Settings
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -46,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import com.helmet.guard.BuildConfig
 import com.helmet.guard.AppGraph
 import com.helmet.guard.ui.components.InfoCard
+import com.helmet.guard.ui.components.PageHeader
 import com.helmet.guard.ui.components.SectionTitle
 import com.helmet.guard.ui.components.StatusPill
 import com.helmet.guard.ui.theme.GuardGreen
@@ -53,6 +57,7 @@ import com.helmet.guard.ui.theme.GuardOrange
 import com.helmet.guard.ui.theme.GuardRed
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit) -> Unit, openContacts: () -> Unit) {
     val context = LocalContext.current
@@ -74,7 +79,7 @@ fun SettingsScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit
         Modifier.statusBarsPadding().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item { Spacer(Modifier.height(8.dp)); SectionTitle("可靠性中心", "${guide.brand} · ${guide.systemName}") }
+        item { PageHeader("可靠性中心", "${guide.brand} · ${guide.systemName}") }
         item {
             InfoCard {
                 val passed = checks.count { it.passed }
@@ -89,15 +94,15 @@ fun SettingsScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         StatusPill(if (check.passed) "通过" else "待设置", if (check.passed) GuardGreen else GuardOrange)
                         Spacer(Modifier.padding(5.dp))
-                        Column { Text(check.title, fontWeight = FontWeight.SemiBold); Text(check.detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        Column(Modifier.weight(1f)) { Text(check.title, fontWeight = FontWeight.SemiBold); Text(check.detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
                 }
-                Button(onClick = { requestPermissions {} }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Security, null); Text(" 授予必要权限") }
-                OutlinedButton(onClick = { context.startActivity(graph.reliability.notificationSettingsIntent()) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Notifications, null); Text(" 检查通知设置") }
+                Button(onClick = { requestPermissions {} }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Icon(Icons.Outlined.Security, null); Text(" 授予必要权限") }
+                OutlinedButton(onClick = { context.startActivity(graph.reliability.notificationSettingsIntent()) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Icon(Icons.Outlined.Notifications, null); Text(" 检查通知设置") }
                 OutlinedButton(onClick = {
                     runCatching { context.startActivity(graph.reliability.batteryOptimizationIntent()) }
                         .onFailure { context.startActivity(graph.reliability.appDetailsIntent()) }
-                }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.BatterySaver, null); Text(" 允许忽略电池优化") }
+                }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Icon(Icons.Outlined.BatterySaver, null); Text(" 允许忽略电池优化") }
                 TextButton(onClick = { context.startActivity(graph.reliability.appDetailsIntent()) }) { Text("后台定位请在权限中选择“始终允许”") }
             }
         }
@@ -109,7 +114,7 @@ fun SettingsScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit
                 }
                 Text(guide.caution, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 graph.reliability.launchManufacturerManager()?.let { intent ->
-                    OutlinedButton(onClick = { runCatching { context.startActivity(intent) } }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.PhoneAndroid, null); Text(" 尝试打开系统管家") }
+                    OutlinedButton(onClick = { runCatching { context.startActivity(intent) } }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Icon(Icons.Outlined.PhoneAndroid, null); Text(" 尝试打开系统管家") }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) { Text("我已完成品牌设置", fontWeight = FontWeight.SemiBold); Text("请在完成以上系统设置后开启", style = MaterialTheme.typography.bodyMedium) }
@@ -124,7 +129,7 @@ fun SettingsScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit
                 SettingLink(Icons.Outlined.Info, "骑手资料", "$riderName ${riderPhone.ifBlank { "" }}") { editRider = true }
                 Text("求救 SIM", fontWeight = FontWeight.SemiBold)
                 if (subscriptions.isEmpty()) Text("未能读取 SIM。请授予电话权限并确认手机已插卡。", color = GuardRed)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     subscriptions.forEach { (id, name) ->
                         FilterChip(selectedSim == id, { scope.launch { graph.preferences.setSmsSubscriptionId(id) } }, label = { Text(name) })
                     }
@@ -157,9 +162,9 @@ fun SettingsScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit
             onDismissRequest = { editRider = false },
             title = { Text("骑手资料") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(name, { name = it.take(20) }, label = { Text("姓名/称呼") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(phone, { phone = it.take(30) }, label = { Text("本人电话（供联系人回拨）") }, modifier = Modifier.fillMaxWidth())
+                Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(name, { name = it.take(20) }, label = { Text("姓名/称呼") }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp))
+                    OutlinedTextField(phone, { phone = it.take(30) }, label = { Text("本人电话") }, supportingText = { Text("供联系人回拨") }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp))
                 }
             },
             confirmButton = { Button(onClick = { scope.launch { graph.preferences.setRider(name, phone) }; editRider = false }) { Text("保存") } },
@@ -170,7 +175,7 @@ fun SettingsScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit
 
 @Composable
 private fun SettingLink(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, detail: String, onClick: () -> Unit) {
-    OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+    OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
         Icon(icon, null)
         Spacer(Modifier.padding(5.dp))
         Column(Modifier.weight(1f), horizontalAlignment = Alignment.Start) { Text(title, fontWeight = FontWeight.SemiBold); Text(detail, style = MaterialTheme.typography.bodyMedium) }
