@@ -1,5 +1,7 @@
 # HelmetGuard BLE 线协议 v1（App 2.0.1 / 固件 2.0）
 
+> App 2.1 沿用本 V1 线协议。联调请同时阅读 [2.1 接口交接](INTEGRATION_2.1.md)，并使用 [ACK/Cancel 补充向量](integration_vectors_2.1.json)。
+
 > 本文件与 `BleProtocol.kt`、`HelmetProtocol.h` 和 CI 固定测试向量同步，是当前仓库的权威定义。不要依据 Kotlin 枚举 ordinal、反编译局部变量名或旧版文档推断线上字节。
 
 ## 1. 设备发现

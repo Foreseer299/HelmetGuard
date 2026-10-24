@@ -1,6 +1,11 @@
 package com.helmet.guard.ui.screens
 
 import android.content.Intent
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -81,8 +86,8 @@ fun TelemetryScreen(
     ) {
         item {
             Spacer(Modifier.height(8.dp))
-            SectionTitle("实时数据", "约 6 秒滚动窗口") {
-                StatusPill(if (recording.isRecording) "REC ${recording.sampleCount}" else if (connection.isReady) "LIVE" else "等待设备", if (recording.isRecording) GuardRed else GuardGreen)
+            SectionTitle("实时数据", "最近 120 帧 · 实时滚动曲线") {
+                StatusPill(if (recording.isRecording) "记录 ${recording.sampleCount} 帧" else if (connection.isReady) "实时" else "等待设备", if (recording.isRecording) GuardRed else GuardGreen)
             }
         }
         item {
@@ -147,7 +152,7 @@ fun TelemetryScreen(
                         Text("运行：${scenario.displayName}")
                     }
                 }
-                Text("建议先开启参数记录，再运行实验。减速带与头盔掉落实验应被算法排除。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("模拟实验需先断开头盔；若要保存曲线，请先新建记录并勾选“标记为模拟数据”。减速带与头盔掉落应被算法排除。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(Modifier.height(24.dp))
         }
@@ -165,6 +170,7 @@ fun TelemetryScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun RecordingDialog(
     onDismiss: () -> Unit,
@@ -183,14 +189,14 @@ private fun RecordingDialog(
         onDismissRequest = onDismiss,
         title = { Text("新建实验记录") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("场景标签", fontWeight = FontWeight.SemiBold)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf(RecordingLabel.NORMAL_RIDE, RecordingLabel.SPEED_BUMP, RecordingLabel.HELMET_DROP).forEach {
                         FilterChip(selected = label == it, onClick = { label = it }, label = { Text(it.displayName) })
                     }
                 }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf(RecordingLabel.EMERGENCY_BRAKE, RecordingLabel.CRASH_TEST, RecordingLabel.OTHER).forEach {
                         FilterChip(selected = label == it, onClick = { label = it }, label = { Text(it.displayName) })
                     }

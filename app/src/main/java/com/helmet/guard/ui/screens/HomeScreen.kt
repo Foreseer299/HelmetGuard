@@ -77,7 +77,8 @@ fun HomeScreen(
     val detector by graph.runtime.detector.collectAsState()
     val emergency by graph.incidents.state.collectAsState()
     val monitoring by graph.preferences.monitoringEnabled.collectAsState(initial = false)
-    val contacts by graph.database.contacts().observeAll().collectAsState(initial = emptyList())
+    val contactsFlow = remember(graph) { graph.database.contacts().observeAll() }
+    val contacts by contactsFlow.collectAsState(initial = emptyList())
     val recording by graph.recorder.state.collectAsState()
     val selectedSim by graph.preferences.smsSubscriptionId.collectAsState(initial = -1)
     val oemConfirmed by graph.preferences.oemSetupConfirmed.collectAsState(initial = false)
@@ -130,8 +131,8 @@ fun HomeScreen(
                     }
                     Spacer(Modifier.height(22.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        StatusPill(if (connection.isReady) "BLE 已就绪" else "BLE 未就绪", if (connection.isReady) GuardCyan else Color.White)
-                        if (recording.isRecording) StatusPill("REC ${recording.sampleCount}", GuardRed)
+                        StatusPill(if (connection.isReady) "蓝牙数据就绪" else "等待蓝牙数据", if (connection.isReady) GuardCyan else Color.White)
+                        if (recording.isRecording) StatusPill("记录 ${recording.sampleCount} 帧", GuardRed)
                     }
                     Spacer(Modifier.height(18.dp))
                     Button(
@@ -147,19 +148,24 @@ fun HomeScreen(
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                MetricCard(Icons.Outlined.Speed, "合加速度", String.format("%.2f", sample?.accelerationG ?: 0f), "g", GuardBlue, Modifier.weight(1f))
-                MetricCard(Icons.Outlined.QueryStats, "角速度", String.format("%.0f", sample?.angularSpeedDps ?: 0f), "°/s", GuardCyan, Modifier.weight(1f))
+                MetricCard(Icons.Outlined.Speed, "合加速度", sample?.let { String.format("%.2f", it.accelerationG) } ?: "--", "g", GuardBlue, Modifier.weight(1f))
+                MetricCard(Icons.Outlined.QueryStats, "角速度", sample?.let { String.format("%.0f", it.angularSpeedDps) } ?: "--", "°/s", GuardCyan, Modifier.weight(1f))
             }
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                MetricCard(Icons.Outlined.Battery5Bar, "头盔电量", sample?.takeIf { it.batteryValid }?.batteryPercent?.toString() ?: "--", if (sample?.batteryValid == true) "%" else "未接分压", GuardGreen, Modifier.weight(1f))
+                MetricCard(Icons.Outlined.Battery5Bar, "头盔电量", sample?.takeIf { it.batteryValid }?.batteryPercent?.toString() ?: "--", if (sample?.batteryValid == true) "%" else "暂无数据", GuardGreen, Modifier.weight(1f))
                 MetricCard(Icons.Outlined.Sensors, "事故置信度", "${(detector.confidence * 100).toInt()}", "%", GuardOrange, Modifier.weight(1f))
             }
         }
         item {
             InfoCard {
-                SectionTitle("检测引擎", detector.label) { StatusPill(detector.stage.name, if (detector.confidence > 0.65f) GuardRed else GuardGreen) }
+                SectionTitle("检测引擎", detector.label) { StatusPill(when (detector.stage) {
+                    com.helmet.guard.domain.DetectorStage.IDLE -> "监测中"
+                    com.helmet.guard.domain.DetectorStage.CANDIDATE, com.helmet.guard.domain.DetectorStage.OBSERVING -> "复核冲击"
+                    com.helmet.guard.domain.DetectorStage.VERIFYING_STILLNESS -> "确认状态"
+                    com.helmet.guard.domain.DetectorStage.COOLDOWN -> "事故处理中"
+                }, if (detector.confidence > 0.65f) GuardRed else GuardGreen) }
                 LinearProgressIndicator(
                     progress = { detector.confidence },
                     modifier = Modifier.fillMaxWidth().height(7.dp).clip(CircleShape),
@@ -221,25 +227,4 @@ fun HomeScreen(
         )
     }
 
-    if (emergency.stage == EmergencyStage.COUNTDOWN) {
-        AlertDialog(
-            onDismissRequest = {},
-            icon = {
-                Box(contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(modifier = Modifier.size(72.dp), color = GuardRed, strokeWidth = 6.dp)
-                    Text("${emergency.secondsLeft}", style = MaterialTheme.typography.headlineMedium, color = GuardRed)
-                }
-            },
-            title = { Text(if (emergency.isSimulation) "模拟事故倒计时" else "检测到疑似事故") },
-            text = { Text(emergency.detail) },
-            confirmButton = {
-                Button(onClick = { graph.incidents.cancel(emergency.eventId) }, colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = GuardGreen)) {
-                    Text("我安全，取消报警")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { graph.incidents.sendNow(emergency.eventId) }) { Text("立即求救", color = GuardRed) }
-            }
-        )
-    }
 }

@@ -1,5 +1,6 @@
 package com.helmet.guard.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -23,20 +24,24 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
 fun StatusPill(text: String, color: Color, modifier: Modifier = Modifier) {
-    Surface(modifier, color = color.copy(alpha = 0.13f), contentColor = color, shape = RoundedCornerShape(50)) {
+    val foreground = if (MaterialTheme.colorScheme.surface.luminance() < 0.2f) lerp(color, Color.White, 0.35f) else color
+    Surface(modifier, color = color.copy(alpha = 0.10f), contentColor = foreground, shape = RoundedCornerShape(50)) {
         Row(Modifier.padding(horizontal = 11.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(7.dp).background(color, CircleShape))
+            Box(Modifier.size(7.dp).background(foreground, CircleShape))
             Spacer(Modifier.size(7.dp))
             Text(text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
@@ -63,17 +68,15 @@ fun MetricCard(
     accent: Color,
     modifier: Modifier = Modifier
 ) {
-    Card(modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(20.dp)) {
+    Card(modifier, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(20.dp)) {
         Column(Modifier.padding(16.dp)) {
             Box(Modifier.size(38.dp).background(accent.copy(alpha = 0.12f), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
                 Icon(icon, null, tint = accent, modifier = Modifier.size(21.dp))
             }
             Spacer(Modifier.height(14.dp))
             Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(value, fontSize = 25.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold)
-                if (unit.isNotBlank()) Text(" $unit", fontSize = 12.sp, modifier = Modifier.padding(bottom = 3.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            Text(value, fontSize = 27.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (unit.isNotBlank()) Text(unit, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -105,6 +108,7 @@ fun InfoCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
         modifier,
         shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { content() } }
 }

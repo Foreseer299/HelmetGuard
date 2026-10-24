@@ -12,6 +12,8 @@ import com.helmet.guard.domain.RecordingLabel
 import com.helmet.guard.domain.RecordingSession
 import com.helmet.guard.domain.RecordingState
 import com.helmet.guard.domain.TelemetrySample
+import kotlinx.coroutines.CoroutineExceptionHandler
+import com.helmet.guard.appGraph
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,6 +27,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
@@ -33,8 +36,12 @@ class TelemetryRecorder(
     private val context: Context,
     private val dao: TelemetryDao
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, _ ->
+        context.appGraph.runtime.postMessage("参数记录未保存，请检查存储空间")
+    })
     private val mutex = Mutex()
+    @Volatile private var recordingSimulation = false
+    val isSimulationRecording: Boolean get() = _state.value.isRecording && recordingSimulation
     private val pending = mutableListOf<TelemetrySampleEntity>()
     private val _state = MutableStateFlow(RecordingState())
     val state: StateFlow<RecordingState> = _state.asStateFlow()
@@ -62,37 +69,43 @@ class TelemetryRecorder(
     ): Long {
         recoveryJob.join()
         require(channels.hasAny) { "至少选择一项记录参数" }
-        if (_state.value.isRecording) stop()
-        val now = System.currentTimeMillis()
-        val id = dao.insertSession(
-            TelemetrySessionEntity(
-                startedAtMs = now,
-                endedAtMs = null,
-                label = label.name,
-                notes = notes.trim(),
-                recordAcceleration = channels.acceleration,
-                recordGyroscope = channels.gyroscope,
-                recordAttitude = channels.attitude,
-                recordDeviceState = channels.deviceState,
-                recordDetectorFeatures = channels.detectorFeatures,
-                sampleCount = 0,
-                deviceName = deviceName,
-                isSimulation = isSimulation
+        return mutex.withLock {
+            stopLocked()
+            val now = System.currentTimeMillis()
+            val id = dao.insertSession(
+                TelemetrySessionEntity(
+                    startedAtMs = now,
+                    endedAtMs = null,
+                    label = label.name,
+                    notes = notes.trim(),
+                    recordAcceleration = channels.acceleration,
+                    recordGyroscope = channels.gyroscope,
+                    recordAttitude = channels.attitude,
+                    recordDeviceState = channels.deviceState,
+                    recordDetectorFeatures = channels.detectorFeatures,
+                    sampleCount = 0,
+                    deviceName = deviceName,
+                    isSimulation = isSimulation
+                )
             )
-        )
-        _state.value = RecordingState(id, now, 0, channels, label)
-        return id
+            recordingSimulation = isSimulation
+            _state.value = RecordingState(id, now, 0, channels, label)
+            id
+        }
     }
 
-    suspend fun stop() {
+    suspend fun stop() = mutex.withLock { stopLocked() }
+
+    private suspend fun stopLocked() {
         val current = _state.value
         val id = current.activeSessionId ?: return
-        flush()
+        flushLocked()
         dao.finishSession(id, System.currentTimeMillis(), _state.value.sampleCount)
         _state.value = RecordingState(channels = current.channels, label = current.label)
     }
 
-    suspend fun record(sample: TelemetrySample, detector: DetectorSnapshot) {
+    suspend fun record(sample: TelemetrySample, detector: DetectorSnapshot, isSimulation: Boolean = false) {
+        if (recordingSimulation != isSimulation) return
         val current = _state.value
         val sessionId = current.activeSessionId ?: return
         val c = current.channels
@@ -123,8 +136,10 @@ class TelemetryRecorder(
             rejection = detector.lastRejection?.name.takeIf { c.detectorFeatures }
         )
         mutex.withLock {
+            val latest = _state.value
+            if (latest.activeSessionId != sessionId || recordingSimulation != isSimulation) return@withLock
             pending += row
-            _state.value = current.copy(sampleCount = current.sampleCount + 1)
+            _state.value = latest.copy(sampleCount = latest.sampleCount + 1)
             if (pending.size >= 100) flushLocked()
         }
     }
@@ -136,9 +151,9 @@ class TelemetryRecorder(
 
     suspend fun loadSamples(sessionId: Long): List<TelemetrySampleEntity> = dao.samples(sessionId)
 
-    suspend fun createCsvShareIntent(sessionId: Long): Intent? {
+    suspend fun createCsvShareIntent(sessionId: Long): Intent? = withContext(Dispatchers.IO) {
         flush()
-        val session = dao.session(sessionId) ?: return null
+        val session = dao.session(sessionId) ?: return@withContext null
         val rows = dao.samples(sessionId)
         val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }
         val file = File(exportDir, "helmetguard-${session.id}-${session.label}.csv")
@@ -156,7 +171,7 @@ class TelemetryRecorder(
             }
         }
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
-        return Intent(Intent.ACTION_SEND).apply {
+        Intent(Intent.ACTION_SEND).apply {
             type = "text/csv"
             putExtra(Intent.EXTRA_STREAM, uri)
             putExtra(Intent.EXTRA_SUBJECT, "HelmetGuard 实验参数 ${session.label}")
@@ -169,8 +184,8 @@ class TelemetryRecorder(
     private suspend fun flushLocked() {
         if (pending.isEmpty()) return
         val batch = pending.toList()
-        pending.clear()
         dao.insertSamples(batch)
+        pending.clear()
         _state.value.activeSessionId?.let { dao.updateCount(it, _state.value.sampleCount) }
     }
 

@@ -52,10 +52,12 @@ class NativeLocationProvider(private val context: Context) {
         if (providers.isEmpty()) return LocationOutcome.ProviderDisabled
 
         val lastKnown = providers.mapNotNull { runCatching { locationManager.getLastKnownLocation(it) }.getOrNull() }
+            .filter { it.isRecentAndValid() }
             .maxWithOrNull(compareBy<Location> { quality(it) }.thenBy { it.time })
         val fresh = lastKnown?.takeIf { System.currentTimeMillis() - it.time <= 30_000 && it.hasAccuracy() && it.accuracy <= 80f }
         if (fresh != null) return LocationOutcome.Success(fresh.toDomain(historical = true))
 
+        val bestObserved = java.util.concurrent.atomic.AtomicReference<Location?>(null)
         val current = withTimeoutOrNull(timeoutMs) {
             suspendCancellableCoroutine<Location?> { continuation ->
                 val finished = AtomicBoolean(false)
@@ -71,7 +73,11 @@ class NativeLocationProvider(private val context: Context) {
 
                 listener = object : LocationListener {
                     override fun onLocationChanged(location: Location) {
-                        if (best == null || quality(location) > quality(best!!)) best = location
+                        if (!location.isRecentAndValid()) return
+                        if (best == null || quality(location) > quality(best!!)) {
+                            best = location
+                            bestObserved.set(location)
+                        }
                         if (location.hasAccuracy() && location.accuracy <= 35f) finish(location)
                     }
                     override fun onProviderDisabled(provider: String) {
@@ -89,10 +95,15 @@ class NativeLocationProvider(private val context: Context) {
         }
         return when {
             current != null -> LocationOutcome.Success(current.toDomain(historical = false))
+            bestObserved.get() != null -> LocationOutcome.Success(bestObserved.get()!!.toDomain(historical = false))
             lastKnown != null -> LocationOutcome.Success(lastKnown.toDomain(historical = true))
             else -> LocationOutcome.Unavailable("定位超时，短信将发送无坐标版本")
         }
     }
+
+    private fun Location.isRecentAndValid(): Boolean =
+        System.currentTimeMillis() - time in 0L..300_000L &&
+            latitude.isFinite() && longitude.isFinite() && latitude in -90.0..90.0 && longitude in -180.0..180.0
 
     private fun quality(location: Location): Double {
         val agePenalty = ((System.currentTimeMillis() - location.time).coerceAtLeast(0) / 1_000.0).coerceAtMost(3_600.0)

@@ -11,6 +11,7 @@ import android.net.Uri
 import android.telephony.PhoneNumberUtils
 import android.telephony.SmsManager
 import android.telephony.SubscriptionManager
+import androidx.room.withTransaction
 import androidx.core.content.ContextCompat
 import com.helmet.guard.data.db.GuardDatabase
 import com.helmet.guard.data.db.SmsPartEntity
@@ -86,12 +87,18 @@ class SmsPipeline(
         var queuedParts = 0
         var queuedContacts = 0
 
+        // Persist the full dispatch plan atomically. After process death, unsent contacts
+        // remain visibly unconfirmed instead of a partial send being reported as complete.
+        database.withTransaction {
+            validContacts.forEach { contact -> parts.indices.forEach { part ->
+                database.smsParts().upsert(row(eventId, contact, part, parts.size, "SENT", SmsPartState.QUEUED, 0, "等待提交至运营商"))
+                database.smsParts().upsert(row(eventId, contact, part, parts.size, "DELIVERED", SmsPartState.QUEUED, 0, "等待送达回执"))
+            } }
+        }
         validContacts.sortedBy { it.priority }.forEach { contact ->
             val sent = ArrayList<PendingIntent>(parts.size)
             val delivered = ArrayList<PendingIntent>(parts.size)
             parts.indices.forEach { part ->
-                database.smsParts().upsert(row(eventId, contact, part, parts.size, "SENT", SmsPartState.QUEUED, 0, "等待提交至运营商"))
-                database.smsParts().upsert(row(eventId, contact, part, parts.size, "DELIVERED", SmsPartState.QUEUED, 0, "等待送达回执"))
                 sent += statusIntent(ACTION_SMS_SENT, eventId, contact, part, parts.size, "SENT")
                 delivered += statusIntent(ACTION_SMS_DELIVERED, eventId, contact, part, parts.size, "DELIVERED")
             }
@@ -125,7 +132,8 @@ class SmsPipeline(
         val locationText = if (location == null) {
             "定位暂时不可用，请立即电话联系并根据骑行路线寻找。"
         } else {
-            val freshness = if (location.historical) "最近位置" else "事故位置"
+            val locationTime = SimpleDateFormat("HH:mm:ss", Locale.CHINA).format(Date(location.timeMs))
+            val freshness = if (location.historical) "最近位置（$locationTime）" else "事故位置"
             val coordinate = String.format(Locale.US, "%.6f,%.6f", location.longitude, location.latitude)
             "$freshness（误差约${location.accuracyMeters.toInt()}米）：https://uri.amap.com/marker?position=$coordinate&name=HelmetGuard求救点"
         }

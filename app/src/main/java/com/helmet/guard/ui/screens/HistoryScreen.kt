@@ -29,6 +29,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
+import com.helmet.guard.ui.incidentMetrics
+import com.helmet.guard.ui.incidentStageText
+import com.helmet.guard.ui.incidentSourceText
+import com.helmet.guard.ui.smsStateText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -60,11 +65,12 @@ import java.util.Locale
 @Composable
 fun HistoryScreen(graph: AppGraph) {
     val sessions by graph.recorder.sessions.collectAsState()
-    val accidents by graph.database.accidents().observeAll().collectAsState(initial = emptyList())
+    val accidentFlow = remember(graph) { graph.database.accidents().observeAll() }
+    val accidents by accidentFlow.collectAsState(initial = emptyList())
     var tab by remember { mutableStateOf(0) }
     var selectedSession by remember { mutableStateOf<RecordingSession?>(null) }
     var sessionSamples by remember { mutableStateOf<List<TelemetrySampleEntity>>(emptyList()) }
-    var selectedAccident by remember { mutableStateOf<AccidentEntity?>(null) }
+    var selectedAccidentId by remember { mutableStateOf<Long?>(null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -87,7 +93,7 @@ fun HistoryScreen(graph: AppGraph) {
             items(sessions, key = { it.id }) { session ->
                 InfoCard(Modifier.clickable {
                     selectedSession = session
-                    scope.launch { sessionSamples = graph.recorder.loadSamples(session.id) }
+
                 }) {
                     Row {
                         Icon(Icons.Outlined.Science, null, tint = GuardBlue)
@@ -103,7 +109,7 @@ fun HistoryScreen(graph: AppGraph) {
                     Row {
                         OutlinedButton(onClick = {
                             scope.launch {
-                                graph.recorder.createCsvShareIntent(session.id)?.let { context.startActivity(Intent.createChooser(it, "导出 CSV")) }
+                                exportSession(context, graph, session.id)
                             }
                         }, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.Download, null); Text(" 导出 CSV") }
                         IconButton(onClick = { scope.launch { graph.recorder.delete(session.id) } }) { Icon(Icons.Outlined.DeleteOutline, null, tint = GuardRed) }
@@ -113,7 +119,7 @@ fun HistoryScreen(graph: AppGraph) {
         } else {
             if (accidents.isEmpty()) item { EmptyHistory("暂无事故事件", "真实事故、手动求救和模拟演练会显示在这里。") }
             items(accidents, key = { it.eventId }) { accident ->
-                InfoCard(Modifier.clickable { selectedAccident = accident }) {
+                InfoCard(Modifier.clickable { selectedAccidentId = accident.eventId }) {
                     Row {
                         Icon(Icons.Outlined.Sms, null, tint = stageColor(accident.stage))
                         Spacer(Modifier.padding(5.dp))
@@ -121,10 +127,10 @@ fun HistoryScreen(graph: AppGraph) {
                             Text(if (accident.isSimulation) "模拟事故演练" else "疑似事故事件", fontWeight = FontWeight.Bold)
                             Text(formatTime(accident.detectedAtMs), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        StatusPill(accident.stage, stageColor(accident.stage))
+                        StatusPill(incidentStageText(accident.stage), stageColor(accident.stage))
                     }
                     Text(accident.detail)
-                    Text("可信度 ${(accident.confidence * 100).toInt()}% · 峰值 %.2fg · 姿态 %.0f°".format(accident.peakAccelerationG, accident.orientationChangeDeg), style = MaterialTheme.typography.bodyMedium)
+                    Text(incidentMetrics(accident.confidence, accident.peakAccelerationG, accident.orientationChangeDeg), style = MaterialTheme.typography.bodyMedium)
                     val latitude = accident.latitude
                     val longitude = accident.longitude
                     if (latitude != null && longitude != null) {
@@ -139,14 +145,20 @@ fun HistoryScreen(graph: AppGraph) {
         item { Spacer(Modifier.height(24.dp)) }
     }
 
+    LaunchedEffect(selectedSession?.id) {
+        sessionSamples = emptyList()
+        selectedSession?.let { sessionSamples = graph.recorder.loadSamples(it.id) }
+    }
     selectedSession?.let { session ->
         SessionDetailDialog(session, sessionSamples, { selectedSession = null }) {
             scope.launch {
-                graph.recorder.createCsvShareIntent(session.id)?.let { context.startActivity(Intent.createChooser(it, "导出 CSV")) }
+                exportSession(context, graph, session.id)
             }
         }
     }
-    selectedAccident?.let { AccidentDetailDialog(graph, it) { selectedAccident = null } }
+    accidents.find { it.eventId == selectedAccidentId }?.let {
+        AccidentDetailDialog(graph, it) { selectedAccidentId = null }
+    }
 }
 
 @Composable
@@ -157,7 +169,7 @@ private fun SessionDetailDialog(session: RecordingSession, rows: List<TelemetryS
         onDismissRequest = dismiss,
         title = { Text(session.label.displayName) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("${session.sampleCount} 帧 · ${duration(session)} · ${formatTime(session.startedAtMs)}")
                 Text("加速度曲线", fontWeight = FontWeight.SemiBold)
                 MiniLineChart(acceleration.downsample(), GuardBlue, Modifier.fillMaxWidth().height(90.dp))
@@ -175,7 +187,8 @@ private fun SessionDetailDialog(session: RecordingSession, rows: List<TelemetryS
 
 @Composable
 private fun AccidentDetailDialog(graph: AppGraph, accident: AccidentEntity, dismiss: () -> Unit) {
-    val parts by graph.database.smsParts().observeForEvent(accident.eventId).collectAsState(initial = emptyList())
+    val partsFlow = remember(graph, accident.eventId) { graph.database.smsParts().observeForEvent(accident.eventId) }
+    val parts by partsFlow.collectAsState(initial = emptyList())
     AlertDialog(
         onDismissRequest = dismiss,
         title = { Text(if (accident.isSimulation) "模拟演练详情" else "事故与短信回执") },
@@ -184,13 +197,14 @@ private fun AccidentDetailDialog(graph: AppGraph, accident: AccidentEntity, dism
                 Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                FeatureLine("处理状态", accident.stage)
-                FeatureLine("检测来源", accident.source)
+                FeatureLine("处理状态", incidentStageText(accident.stage))
+                FeatureLine("检测来源", incidentSourceText(accident.source))
                 FeatureLine("可信度", "${(accident.confidence * 100).toInt()}%")
                 FeatureLine("冲击 / 旋转", "%.2fg / %.0f°/s".format(accident.peakAccelerationG, accident.peakAngularSpeedDps))
+                Text(accident.detail)
                 if (parts.isEmpty()) Text(if (accident.isSimulation) "模拟演练未发送真实短信" else "暂无短信分段回执", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 parts.forEach { part ->
-                    Text("${part.contactName} · ${part.kind} ${part.partIndex + 1}/${part.partCount}：${part.state}\n${part.detail}", style = MaterialTheme.typography.bodyMedium)
+                    Text("${part.contactName} · ${if (part.kind == "SENT") "提交回执" else "送达回执"} ${part.partIndex + 1}/${part.partCount}：${smsStateText(part.state)}\n${part.detail}", style = MaterialTheme.typography.bodyMedium)
                 }
             }
         },
@@ -210,4 +224,16 @@ private fun channelText(session: RecordingSession): String = buildList {
     if (session.channels.detectorFeatures) add("检测特征")
 }.joinToString("/")
 private fun List<Float>.downsample(): List<Float> { if (size <= 180) return this; val step = size / 180f; return List(180) { this[(it * step).toInt().coerceAtMost(lastIndex)] } }
-private fun stageColor(stage: String) = when (stage) { "SENT" -> GuardGreen; "FAILED" -> GuardRed; "CANCELLED", "SIMULATED" -> GuardOrange; else -> GuardBlue }
+private fun stageColor(stage: String) = when (stage) { "SENT" -> GuardGreen; "FAILED" -> GuardRed; "CANCELLED", "SIMULATED", "PARTIAL_SUCCESS" -> GuardOrange; else -> GuardBlue }
+
+private suspend fun exportSession(context: android.content.Context, graph: AppGraph, sessionId: Long) {
+    try {
+        val intent = graph.recorder.createCsvShareIntent(sessionId)
+        if (intent == null) graph.runtime.postMessage("这条记录已不存在")
+        else context.startActivity(Intent.createChooser(intent, "导出 CSV"))
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        graph.runtime.postMessage("无法导出记录，请检查可用存储空间和分享应用")
+    }
+}
