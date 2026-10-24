@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -51,8 +50,6 @@ import com.helmet.guard.AppGraph
 import com.helmet.guard.ui.connectionPhaseText
 import com.helmet.guard.domain.ConnectionPhase
 import com.helmet.guard.ui.components.InfoCard
-import com.helmet.guard.ui.components.PageHeader
-import com.helmet.guard.ui.components.EmptyState
 import com.helmet.guard.ui.components.SectionTitle
 import com.helmet.guard.ui.components.StatusPill
 import com.helmet.guard.ui.theme.GuardBlue
@@ -76,7 +73,8 @@ fun DeviceScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit) 
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            PageHeader("我的头盔", "ESP32-S3 · MPU6050") {
+            Spacer(Modifier.height(8.dp))
+            SectionTitle("我的头盔", "ESP32-S3 · MPU6050") {
                 StatusPill(connectionPhaseText(connection.phase), if (connection.isReady) GuardGreen else GuardOrange)
             }
         }
@@ -93,9 +91,11 @@ fun DeviceScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit) 
                 }
                 Text(connection.message, style = MaterialTheme.typography.bodyMedium)
                 if (connection.isReady) {
-                    OutlinedButton(onClick = { graph.ble.findHelmet() }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("响铃查找") }
-                    OutlinedButton(onClick = { graph.ble.calibrate() }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("校准传感器") }
-                    OutlinedButton(onClick = { graph.ble.disconnect() }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("断开连接") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedButton(onClick = { graph.ble.findHelmet() }, modifier = Modifier.weight(1f)) { Text("响铃查找") }
+                        OutlinedButton(onClick = { graph.ble.calibrate() }, modifier = Modifier.weight(1f)) { Text("校准传感器") }
+                    }
+                    OutlinedButton(onClick = { graph.ble.disconnect() }, modifier = Modifier.fillMaxWidth()) { Text("断开连接") }
                 } else {
                     Button(
                         onClick = {
@@ -124,7 +124,7 @@ fun DeviceScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit) 
                             modifier = Modifier.fillMaxWidth()
                         ) { Text("开启手机蓝牙") }
                     }
-                    OutlinedButton(onClick = associateCompanion, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                    OutlinedButton(onClick = associateCompanion, modifier = Modifier.fillMaxWidth()) {
                         Text("系统配套设备关联（增强后台连接）")
                     }
                     if (boundAddress != null) {
@@ -171,16 +171,18 @@ fun DeviceScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit) 
                                 )
                             }
                             Text(device.address, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(signalLabel(device.rssi), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                        Text(signalLabel(device.rssi), style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
         }
         if (devices.isEmpty() && connection.phase != ConnectionPhase.READY) {
             item {
-                EmptyState(Icons.Outlined.Bluetooth, "找不到头盔？",
-                    "给头盔充电并开机，放在手机附近 1–2 米内，然后点击上方扫描。\n刚授予权限时，请在授权完成后重新扫描。Android 11 及以下还需开启手机定位。\n仍无结果时，尝试关闭再开启手机蓝牙。")
+                InfoCard {
+                    Text("找不到头盔？", fontWeight = FontWeight.Bold)
+                    Text("1. 确认 ESP32-S3 已上电，串口出现 BLE advertising。\n2. 将头盔放在手机 1–2 米内。\n3. 若刚授予权限，请等待授权完成后重新扫描。\n4. Android 11 及以下还需开启系统定位总开关。\n5. 仍无结果时关闭再开启手机蓝牙。", style = MaterialTheme.typography.bodyMedium)
+                }
             }
         }
         item { SectionTitle("设备自检", "检查蓝牙数据、传感器与定位是否可用") }

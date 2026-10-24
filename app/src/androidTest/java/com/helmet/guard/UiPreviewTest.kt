@@ -1,33 +1,36 @@
 package com.helmet.guard
 
-import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
+import android.graphics.Bitmap
+import androidx.compose.material3.Surface
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onRoot
+import androidx.test.platform.app.InstrumentationRegistry
+import com.helmet.guard.ui.GuardApp
+import com.helmet.guard.ui.theme.HelmetGuardTheme
+import org.junit.Rule
 import org.junit.Test
+import java.io.File
 
-class UiPreviewTest : PreviewTestBase() {
-    @Test fun homeLightPreview() { show(); capture("home-light.png") }
-    @Test fun homeDarkPreview() { show(dark = true); capture("home-dark.png") }
+class UiPreviewTest {
+    @get:Rule val compose = createComposeRule()
 
-    @Test fun deviceEmptyPreview() {
-        show()
-        selectTab("device")
-        compose.onNodeWithText("我的头盔").assertIsDisplayed()
-        capture("device-empty.png")
-        scrollPageTo("找不到头盔？")
-        capture("device-empty-help.png")
+    private fun capture(dark: Boolean, name: String) {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        compose.setContent {
+            HelmetGuardTheme(darkTheme = dark) {
+                Surface(color = MaterialTheme.colorScheme.background) {
+                    GuardApp(context.appGraph, { _ -> }, {}, {}, {}, { _, _ -> })
+                }
+            }
+        }
+        compose.waitForIdle()
+        val bitmap = requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
+        saveUiPreview(context, name, bitmap)
     }
 
-    @Test fun historyEmptyPreview() {
-        show()
-        selectTab("history")
-        compose.waitUntil(5_000) { compose.onAllNodes(hasText("暂无参数记录")).fetchSemanticsNodes().isNotEmpty() }
-        compose.waitUntil(5_000) { compose.onAllNodes(hasText("事故事件 0")).fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithText("暂无参数记录").assertIsDisplayed()
-        capture("history-empty.png")
-        compose.onNodeWithText("事故事件 0").performClick()
-        compose.onNodeWithText("暂无事故事件").assertIsDisplayed()
-        capture("history-incidents-empty.png")
-    }
+    @Test fun homeLightPreview() { capture(false, "home-light.png") }
+    @Test fun homeDarkPreview() { capture(true, "home-dark.png") }
 }

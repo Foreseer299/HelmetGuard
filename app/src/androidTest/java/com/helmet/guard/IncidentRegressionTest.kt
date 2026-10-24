@@ -1,12 +1,16 @@
 package com.helmet.guard
 
 import android.content.Context
+import android.graphics.Bitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isRoot
 import com.helmet.guard.ui.components.EmergencyDialog
-import com.helmet.guard.ui.theme.HelmetGuardTheme
+import java.io.File
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -69,14 +73,15 @@ class IncidentRegressionTest {
             101, now, now, "HELMET_HARDWARE", "CANCELLED", 0.94f,
             6.42f, 731f, 38f, 0, now, null, null, null, null, null, "用户确认安全", false
         ))
-        compose.setContent { HelmetGuardTheme { HistoryScreen(graph) } }
+        compose.setContent { MaterialTheme { HistoryScreen(graph) } }
         compose.waitUntil(5_000) {
             compose.onAllNodes(androidx.compose.ui.test.hasText("事故事件 1")).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithText("事故事件 1").performClick()
         compose.onNodeWithText("可信度 94% · 峰值 6.42g · 姿态 38°").assertIsDisplayed().performClick()
         compose.waitForIdle()
-        captureUiPreview(InstrumentationRegistry.getInstrumentation().targetContext, "incident-detail.png")
+        saveUiPreview(InstrumentationRegistry.getInstrumentation().targetContext, "incident-detail.png",
+            requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()))
         compose.onNodeWithText("事故与短信回执").assertIsDisplayed()
         compose.onNodeWithText("头盔检测").assertIsDisplayed()
         graph.database.accidents().updateStage(101, "PARTIAL_SUCCESS", "部分提交，需要跟进")
@@ -129,12 +134,13 @@ class IncidentRegressionTest {
     }
 
     @Test fun globalCountdownIsActionableOutsideHome() = runBlocking<Unit> {
-        compose.setContent { HelmetGuardTheme { EmergencyDialog(graph) } }
+        compose.setContent { MaterialTheme { EmergencyDialog(graph) } }
         graph.incidents.trigger(hardware().copy(hardware = null, isSimulation = true), 30)
         awaitCondition { graph.incidents.state.value.stage == EmergencyStage.COUNTDOWN }
         compose.onNodeWithText("模拟事故演练").assertIsDisplayed()
         compose.waitForIdle()
-        captureUiPreview(InstrumentationRegistry.getInstrumentation().targetContext, "incident-countdown.png")
+        saveUiPreview(InstrumentationRegistry.getInstrumentation().targetContext, "incident-countdown.png",
+            requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()))
         compose.onNodeWithText("我安全，取消报警").performClick()
         awaitCondition { graph.incidents.state.value.stage == EmergencyStage.CANCELLED }
     }

@@ -1,14 +1,11 @@
 package com.helmet.guard.ui.screens
 
 import android.telephony.PhoneNumberUtils
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -45,8 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.helmet.guard.AppGraph
 import com.helmet.guard.data.db.EmergencyContactEntity
 import com.helmet.guard.ui.components.InfoCard
-import com.helmet.guard.ui.components.PageHeader
-import com.helmet.guard.ui.components.EmptyState
+import com.helmet.guard.ui.components.SectionTitle
 import com.helmet.guard.ui.components.StatusPill
 import com.helmet.guard.ui.theme.GuardBlue
 import com.helmet.guard.ui.theme.GuardGreen
@@ -71,16 +67,16 @@ fun ContactsScreen(graph: AppGraph, back: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = back) { Icon(Icons.Outlined.ArrowBack, "返回") }
-                Column(Modifier.weight(1f)) { PageHeader("紧急联系人", "管理求救短信的接收人") }
+                SectionTitle("紧急联系人", "管理求救短信的接收人")
             }
         }
         item {
             InfoCard {
                 Text("事故倒计时结束后，应用会向所有“启用”的联系人发送。请事先征得联系人同意，并定期通过模拟演练检查流程。", style = MaterialTheme.typography.bodyMedium)
-                Button(onClick = { editing = null; showEditor = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Icon(Icons.Outlined.Add, null); Text(" 添加联系人") }
+                Button(onClick = { editing = null; showEditor = true }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Add, null); Text(" 添加联系人") }
             }
         }
-        if (contacts.isEmpty()) item { EmptyState(Icons.Outlined.Person, "至少添加一位联系人", "点击上方“添加联系人”。没有启用的联系人时，自动短信求救无法执行。") }
+        if (contacts.isEmpty()) item { InfoCard { Text("至少添加一位联系人", fontWeight = FontWeight.Bold); Text("没有联系人时，自动短信求救无法执行。", color = GuardRed) } }
         items(contacts, key = { it.id }) { contact ->
             InfoCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -90,12 +86,7 @@ fun ContactsScreen(graph: AppGraph, back: () -> Unit) {
                         Text(contact.name, fontWeight = FontWeight.Bold)
                         Text("${mask(contact.phone)} · ${contact.relationship}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column(Modifier.weight(1f)) {
-                        StatusPill(if (contact.enabled) "已启用" else "已停用", if (contact.enabled) GuardGreen else GuardOrange)
-                        Text("优先级 ${contact.priority + 1}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                    StatusPill("优先级 ${contact.priority + 1}", if (contact.enabled) GuardGreen else GuardOrange)
                     Switch(contact.enabled, { enabled -> scope.launch { graph.database.contacts().setEnabled(contact.id, enabled) } })
                 }
                 Row {
@@ -141,11 +132,11 @@ private fun ContactEditor(original: EmergencyContactEntity?, defaultPriority: In
         onDismissRequest = dismiss,
         title = { Text(if (original == null) "添加紧急联系人" else "编辑联系人") },
         text = {
-            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(name, { name = it.take(24) }, label = { Text("姓名") }, singleLine = true, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(name, { name = it.take(24) }, label = { Text("姓名") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(phone, { phone = it.take(30) }, label = { Text("手机号（可含 +86）") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), modifier = Modifier.fillMaxWidth(), isError = phone.isNotBlank() && !PhoneNumberUtils.isGlobalPhoneNumber(normalizedPhone))
-                OutlinedTextField(relationship, { relationship = it.take(16) }, label = { Text("关系") }, singleLine = true, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp))
-                OutlinedTextField(priority, { priority = it.filter(Char::isDigit).take(2) }, label = { Text("发送优先级") }, supportingText = { Text("数字越小越先发送") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp))
+                OutlinedTextField(relationship, { relationship = it.take(16) }, label = { Text("关系") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(priority, { priority = it.filter(Char::isDigit).take(2) }, label = { Text("优先级（数字越小越先发送）") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
             }
         },
         confirmButton = {
