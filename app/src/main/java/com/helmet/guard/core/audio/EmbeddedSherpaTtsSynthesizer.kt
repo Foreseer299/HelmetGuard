@@ -11,7 +11,7 @@ import kotlin.math.roundToInt
  */
 class EmbeddedSherpaTtsSynthesizer(context: Context) {
     private val appContext = context.applicationContext
-    private val modelRoot = "offline_tts/vits-icefall-zh-aishell3"
+    private val modelRoot = "offline_tts/vits-piper-zh_CN-xiao_ya-medium-int8"
     private val lock = Any()
     @Volatile private var engine: Any? = null
     @Volatile private var generateMethod: Method? = null

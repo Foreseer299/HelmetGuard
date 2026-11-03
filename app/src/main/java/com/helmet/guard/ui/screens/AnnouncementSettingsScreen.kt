@@ -170,7 +170,7 @@ fun AnnouncementSettingsScreen(graph: AppGraph, onBack: () -> Unit) {
                         onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
                         modifier = Modifier.fillMaxWidth()
                     ) { Icon(Icons.Outlined.Notifications, null); Text(" 打开通知使用权") }
-                    Text(if (listenerConnected) "通知监听：运行中" else "通知监听：未连接，当前收不到短信通知",
+                    Text(if (listenerConnected) "通知监听：运行中" else "通知监听：等待系统连接（需要关闭通知使用权再重新打开）",
                         color = if (listenerConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
                     if (!listenerConnected) {
                         Text(if (notificationAccess) "系统已授权但尚未连接。可尝试重连；若仍失败，请在通知使用权中关闭后重新允许 HelmetGuard。" else "请先在系统通知使用权中允许 HelmetGuard；启用通讯服务不能替代此授权。")
@@ -273,15 +273,15 @@ fun AnnouncementSettingsScreen(graph: AppGraph, onBack: () -> Unit) {
             }
 
             }
-            item { SectionTitle("离线 TTS 音色", "仅显示系统引擎中可确认不依赖网络的中文 Voice") }
+            item { SectionTitle("离线 TTS 音色", "默认使用内置小雅女声，也可选择系统离线中文音色") }
             item {
                 InfoCard {
                     val info = engineInfo
                     Text(
                         when {
                             info == null -> "正在检查系统 TTS…"
-                            info.eligibleChineseVoices > 0 -> "系统离线音色：${info.eligibleChineseVoices} 个（优先使用）"
-                            info.embeddedFallbackAvailable -> "无合格系统音色，将使用应用内离线音色"
+                            info.embeddedFallbackAvailable -> "内置小雅女声 · 完全离线 · 模型约19 MB"
+                            info.eligibleChineseVoices > 0 -> "系统离线音色：${info.eligibleChineseVoices} 个（可选）"
                             !info.trustedSystemEngine -> "当前 TTS 不是系统引擎，动态通知不会交给它"
                             else -> "未找到可用的离线中文音色"
                         },
@@ -290,10 +290,13 @@ fun AnnouncementSettingsScreen(graph: AppGraph, onBack: () -> Unit) {
                     Text("当前音色", fontWeight = FontWeight.SemiBold)
                     Button(onClick = { voiceMenu = true }, modifier = Modifier.fillMaxWidth()) {
                         Icon(Icons.Outlined.Person, null)
-                        Text(" ${voices.firstOrNull { it.name == selectedVoice }?.name ?: "自动选择离线音色"}")
+                        Text(" ${if ((selectedVoice.isBlank() || selectedVoice == LocalTtsSynthesizer.EMBEDDED_VOICE) && info?.embeddedFallbackAvailable == true) "小雅 · 自然女声（内置离线）" else voices.firstOrNull { it.name == selectedVoice }?.name ?: "自动选择离线音色"}")
                     }
                     DropdownMenu(expanded = voiceMenu, onDismissRequest = { voiceMenu = false }) {
-                        DropdownMenuItem(text = { Text("自动选择系统离线音色") }, onClick = {
+                        if (info?.embeddedFallbackAvailable == true) DropdownMenuItem(text = { Text("小雅 · 自然女声（内置离线）") }, onClick = {
+                            voiceMenu = false; scope.launch { graph.preferences.setTtsVoiceName(LocalTtsSynthesizer.EMBEDDED_VOICE) }
+                        })
+                        DropdownMenuItem(text = { Text("自动选择（优先内置小雅）") }, onClick = {
                             voiceMenu = false; scope.launch { graph.preferences.setTtsVoiceName("") }
                         })
                         voices.forEach { voice ->
@@ -305,8 +308,11 @@ fun AnnouncementSettingsScreen(graph: AppGraph, onBack: () -> Unit) {
                     }
                     Text("语速 ${"%.2f".format(rate)}")
                     Slider(rate, { scope.launch { graph.preferences.setTtsSpeechRate(it) } }, valueRange = .6f..1.5f)
-                    Text("音调 ${"%.2f".format(pitch)}")
-                    Slider(pitch, { scope.launch { graph.preferences.setTtsPitch(it) } }, valueRange = .6f..1.5f)
+                    if (selectedVoice.isNotBlank() && selectedVoice != LocalTtsSynthesizer.EMBEDDED_VOICE) {
+                        Text("音调 ${"%.2f".format(pitch)}")
+                        Slider(pitch, { scope.launch { graph.preferences.setTtsPitch(it) } }, valueRange = .6f..1.5f)
+                    }
+                    Text("内置小雅保持原声；调整语速不会改变声调")
                     Text("头盔音量 $volume%")
                     Slider(volume.toFloat(), { scope.launch { graph.preferences.setHelmetVolume(it.toInt()) } }, valueRange = 0f..100f)
                     OutlinedButton(

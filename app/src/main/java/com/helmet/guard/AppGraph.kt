@@ -61,6 +61,8 @@ class AppGraph(context: Context) {
             put("codec", cap?.codec); put("sampleRateHz", cap?.sampleRateHz)
             put("mode", announcementSettings.state.value.mode)
             put("phoneTestPlayback", announcementSettings.state.value.phoneTestPlayback)
+            put("ttsProviderSelection", if (announcementSettings.state.value.voiceName.isBlank() || announcementSettings.state.value.voiceName == com.helmet.guard.core.audio.LocalTtsSynthesizer.EMBEDDED_VOICE) "BUILTIN_XIAOYA" else "SYSTEM_OFFLINE")
+            put("ttsSpeechRate", announcementSettings.state.value.speechRate)
             put("smsSpeechMode", announcementSettings.state.value.smsSpeechMode.name)
             put("callSpeechMode", announcementSettings.state.value.callSpeechMode.name)
             put("reminderServiceRunning", com.helmet.guard.service.AnnouncementService.running.value)

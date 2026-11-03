@@ -1,4 +1,4 @@
-> 当前版本：**2.3.1**。通知监听恢复见 [补丁说明](docs/RELEASE_2.3.1.md) 和 [测试记录](docs/TEST_RESULTS_2.3.1.md)；短信/来电选项见 [2.3说明](docs/RELEASE_2.3.0.md)。
+> 当前版本：**2.3.2**。改用小雅离线女声并补全监听提示，见 [发布说明](docs/RELEASE_2.3.2.md)、[测试记录](docs/TEST_RESULTS_2.3.2.md) 与 [音色来源](docs/THIRD_PARTY_TTS.md)。
 
 # HelmetGuard 2.2.0-alpha01
 

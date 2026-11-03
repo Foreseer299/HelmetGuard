@@ -75,6 +75,7 @@ class LocalTtsSynthesizer(context: Context) {
     }
 
     suspend fun speakPreview(text: String, voiceName: String? = null, speechRate: Float = 1f, pitch: Float = 1f): Boolean {
+        if (preferEmbedded(voiceName)) return embeddedPreview(text, speechRate)
         val initialized = (withTimeoutOrNull(5_000) { ready.await() } ?: false)
         val voice = if (initialized) resolveEligibleVoice(voiceName) else null
         if (voice != null) {
@@ -84,11 +85,7 @@ class LocalTtsSynthesizer(context: Context) {
             return tts.speak(text.take(120), TextToSpeech.QUEUE_FLUSH, Bundle(), "preview") == TextToSpeech.SUCCESS
         }
         if (!embeddedFallback.isBundledAndSupported()) return false
-        return runCatching {
-            val pcm = withContext(Dispatchers.Default) { embeddedFallback.synthesize(text.take(120), speechRate, 16_000) }
-            playPreviewPcm(pcm, 16_000)
-            true
-        }.getOrDefault(false)
+        return embeddedPreview(text, speechRate)
     }
 
     suspend fun synthesize(
@@ -99,6 +96,9 @@ class LocalTtsSynthesizer(context: Context) {
         targetRateHz: Int = 16_000
     ): ShortArray {
         require(text.isNotBlank() && text.length <= 120)
+        if (preferEmbedded(voiceName)) return withContext(Dispatchers.Default) {
+            embeddedFallback.synthesize(text, speechRate, targetRateHz)
+        }
         val systemReady = (withTimeoutOrNull(5_000) { ready.await() } ?: false)
         val systemVoice = if (systemReady) resolveEligibleVoice(voiceName) else null
         if (systemVoice != null) {
@@ -115,6 +115,18 @@ class LocalTtsSynthesizer(context: Context) {
             embeddedFallback.synthesize(text, speechRate, targetRateHz)
         }
     }
+
+    private fun preferEmbedded(voiceName: String?): Boolean =
+        embeddedFallback.isBundledAndSupported() && (voiceName.isNullOrBlank() || voiceName == EMBEDDED_VOICE)
+
+    private suspend fun embeddedPreview(text: String, speechRate: Float): Boolean = try {
+        val pcm = withContext(Dispatchers.Default) { embeddedFallback.synthesize(text.take(120), speechRate, 16_000) }
+        playPreviewPcm(pcm, 16_000)
+        true
+    } catch (cancelled: CancellationException) { throw cancelled }
+      catch (_: Exception) { false }
+
+    companion object { const val EMBEDDED_VOICE = "embedded:xiaoya" }
 
     private suspend fun synthesizeWithSystem(
         text: String,
