@@ -1,0 +1,659 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 3,
+    "identityHash": "cc408228faaf9e442b78128fcf1d3204",
+    "entities": [
+      {
+        "tableName": "emergency_contacts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `phone` TEXT NOT NULL, `relationship` TEXT NOT NULL, `priority` INTEGER NOT NULL, `enabled` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "phone",
+            "columnName": "phone",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "relationship",
+            "columnName": "relationship",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "priority",
+            "columnName": "priority",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "telemetry_sessions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `startedAtMs` INTEGER NOT NULL, `endedAtMs` INTEGER, `label` TEXT NOT NULL, `notes` TEXT NOT NULL, `recordAcceleration` INTEGER NOT NULL, `recordGyroscope` INTEGER NOT NULL, `recordAttitude` INTEGER NOT NULL, `recordDeviceState` INTEGER NOT NULL, `recordDetectorFeatures` INTEGER NOT NULL, `sampleCount` INTEGER NOT NULL, `deviceName` TEXT NOT NULL, `isSimulation` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAtMs",
+            "columnName": "startedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endedAtMs",
+            "columnName": "endedAtMs",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "label",
+            "columnName": "label",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recordAcceleration",
+            "columnName": "recordAcceleration",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recordGyroscope",
+            "columnName": "recordGyroscope",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recordAttitude",
+            "columnName": "recordAttitude",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recordDeviceState",
+            "columnName": "recordDeviceState",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recordDetectorFeatures",
+            "columnName": "recordDetectorFeatures",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sampleCount",
+            "columnName": "sampleCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceName",
+            "columnName": "deviceName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isSimulation",
+            "columnName": "isSimulation",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "telemetry_samples",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `sessionId` INTEGER NOT NULL, `receivedAtMs` INTEGER NOT NULL, `deviceTimestampMs` INTEGER NOT NULL, `sequence` INTEGER NOT NULL, `ax` REAL, `ay` REAL, `az` REAL, `accelerationG` REAL, `gx` REAL, `gy` REAL, `gz` REAL, `angularSpeedDps` REAL, `roll` REAL, `pitch` REAL, `yaw` REAL, `batteryPercent` INTEGER, `batteryValid` INTEGER, `imuHealthy` INTEGER, `calibrated` INTEGER, `detectorStage` TEXT, `detectorConfidence` REAL, `impactPeakG` REAL, `orientationChangeDeg` REAL, `rejection` TEXT, FOREIGN KEY(`sessionId`) REFERENCES `telemetry_sessions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sessionId",
+            "columnName": "sessionId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "receivedAtMs",
+            "columnName": "receivedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceTimestampMs",
+            "columnName": "deviceTimestampMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sequence",
+            "columnName": "sequence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ax",
+            "columnName": "ax",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "ay",
+            "columnName": "ay",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "az",
+            "columnName": "az",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "accelerationG",
+            "columnName": "accelerationG",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "gx",
+            "columnName": "gx",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "gy",
+            "columnName": "gy",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "gz",
+            "columnName": "gz",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "angularSpeedDps",
+            "columnName": "angularSpeedDps",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "roll",
+            "columnName": "roll",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "pitch",
+            "columnName": "pitch",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "yaw",
+            "columnName": "yaw",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "batteryPercent",
+            "columnName": "batteryPercent",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "batteryValid",
+            "columnName": "batteryValid",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "imuHealthy",
+            "columnName": "imuHealthy",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "calibrated",
+            "columnName": "calibrated",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "detectorStage",
+            "columnName": "detectorStage",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "detectorConfidence",
+            "columnName": "detectorConfidence",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "impactPeakG",
+            "columnName": "impactPeakG",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "orientationChangeDeg",
+            "columnName": "orientationChangeDeg",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "rejection",
+            "columnName": "rejection",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_telemetry_samples_sessionId",
+            "unique": false,
+            "columnNames": [
+              "sessionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_telemetry_samples_sessionId` ON `${TABLE_NAME}` (`sessionId`)"
+          },
+          {
+            "name": "index_telemetry_samples_sessionId_receivedAtMs",
+            "unique": false,
+            "columnNames": [
+              "sessionId",
+              "receivedAtMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_telemetry_samples_sessionId_receivedAtMs` ON `${TABLE_NAME}` (`sessionId`, `receivedAtMs`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "telemetry_sessions",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "sessionId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "accidents",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`eventId` INTEGER NOT NULL, `detectedAtMs` INTEGER NOT NULL, `updatedAtMs` INTEGER NOT NULL, `source` TEXT NOT NULL, `stage` TEXT NOT NULL, `confidence` REAL NOT NULL, `peakAccelerationG` REAL NOT NULL, `peakAngularSpeedDps` REAL NOT NULL, `orientationChangeDeg` REAL NOT NULL, `freeFallDurationMs` INTEGER NOT NULL, `countdownDeadlineMs` INTEGER NOT NULL, `latitude` REAL, `longitude` REAL, `locationAccuracyMeters` REAL, `locationTimeMs` INTEGER, `locationProvider` TEXT, `detail` TEXT NOT NULL, `isSimulation` INTEGER NOT NULL, `hardwareDeviceId` INTEGER, `hardwareEventId` INTEGER, `hardwareAddress` TEXT, PRIMARY KEY(`eventId`))",
+        "fields": [
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "detectedAtMs",
+            "columnName": "detectedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updatedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stage",
+            "columnName": "stage",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "confidence",
+            "columnName": "confidence",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "peakAccelerationG",
+            "columnName": "peakAccelerationG",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "peakAngularSpeedDps",
+            "columnName": "peakAngularSpeedDps",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "orientationChangeDeg",
+            "columnName": "orientationChangeDeg",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "freeFallDurationMs",
+            "columnName": "freeFallDurationMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "countdownDeadlineMs",
+            "columnName": "countdownDeadlineMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "latitude",
+            "columnName": "latitude",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "longitude",
+            "columnName": "longitude",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "locationAccuracyMeters",
+            "columnName": "locationAccuracyMeters",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "locationTimeMs",
+            "columnName": "locationTimeMs",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "locationProvider",
+            "columnName": "locationProvider",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "detail",
+            "columnName": "detail",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isSimulation",
+            "columnName": "isSimulation",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hardwareDeviceId",
+            "columnName": "hardwareDeviceId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "hardwareEventId",
+            "columnName": "hardwareEventId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "hardwareAddress",
+            "columnName": "hardwareAddress",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "eventId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_accidents_detectedAtMs",
+            "unique": false,
+            "columnNames": [
+              "detectedAtMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_accidents_detectedAtMs` ON `${TABLE_NAME}` (`detectedAtMs`)"
+          },
+          {
+            "name": "index_accidents_hardwareDeviceId_hardwareEventId",
+            "unique": true,
+            "columnNames": [
+              "hardwareDeviceId",
+              "hardwareEventId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_accidents_hardwareDeviceId_hardwareEventId` ON `${TABLE_NAME}` (`hardwareDeviceId`, `hardwareEventId`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "sms_parts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`eventId` INTEGER NOT NULL, `contactId` INTEGER NOT NULL, `contactName` TEXT NOT NULL, `phoneMasked` TEXT NOT NULL, `partIndex` INTEGER NOT NULL, `partCount` INTEGER NOT NULL, `kind` TEXT NOT NULL, `state` TEXT NOT NULL, `resultCode` INTEGER NOT NULL, `detail` TEXT NOT NULL, `updatedAtMs` INTEGER NOT NULL, PRIMARY KEY(`eventId`, `contactId`, `partIndex`, `kind`))",
+        "fields": [
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contactId",
+            "columnName": "contactId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contactName",
+            "columnName": "contactName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "phoneMasked",
+            "columnName": "phoneMasked",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "partIndex",
+            "columnName": "partIndex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "partCount",
+            "columnName": "partCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "resultCode",
+            "columnName": "resultCode",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "detail",
+            "columnName": "detail",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtMs",
+            "columnName": "updatedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "eventId",
+            "contactId",
+            "partIndex",
+            "kind"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sms_parts_eventId",
+            "unique": false,
+            "columnNames": [
+              "eventId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sms_parts_eventId` ON `${TABLE_NAME}` (`eventId`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "system_logs",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `timestampMs` INTEGER NOT NULL, `level` TEXT NOT NULL, `category` TEXT NOT NULL, `message` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestampMs",
+            "columnName": "timestampMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "level",
+            "columnName": "level",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "message",
+            "columnName": "message",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_system_logs_timestampMs",
+            "unique": false,
+            "columnNames": [
+              "timestampMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_system_logs_timestampMs` ON `${TABLE_NAME}` (`timestampMs`)"
+          }
+        ],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'cc408228faaf9e442b78128fcf1d3204')"
+    ]
+  }
+}

@@ -10,6 +10,7 @@ import android.os.IBinder
 import androidx.core.content.ContextCompat
 import com.helmet.guard.appGraph
 import com.helmet.guard.core.ble.HelmetButton
+import com.helmet.guard.core.call.MultiSimCallMonitor
 import com.helmet.guard.core.detector.AdvancedAccidentDetector
 import com.helmet.guard.domain.HardwareIncidentIdentity
 import com.helmet.guard.domain.EmergencyStage
@@ -42,11 +43,21 @@ class HelmetGuardService : Service() {
     private var foregroundReady = false
     private var simulationJob: Job? = null
     private val simulationDetector = AdvancedAccidentDetector()
+    private val callMonitor by lazy {
+        MultiSimCallMonitor(this) { subscriptionId, state, elapsedMs ->
+            val settings = graph.announcementSettings.state.value
+            if (state != android.telephony.TelephonyManager.CALL_STATE_RINGING || (settings.enabled && settings.calls)) {
+                graph.callSessions.onState(subscriptionId, state, elapsedMs)
+            }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
         foregroundReady = enterForeground(includeLocation = false)
         if (!foregroundReady) return
+        callMonitor.start()
+        graph.announcementAudio.start()
         scope.launch {
             graph.ble.telemetry.collect {
                 simulationJob?.cancel()
@@ -101,7 +112,10 @@ class HelmetGuardService : Service() {
         }
         scope.launch {
             graph.incidents.state.map { it.stage }.distinctUntilChanged().collect { stage ->
-                if (stage !in setOf(EmergencyStage.COUNTDOWN, EmergencyStage.LOCATING, EmergencyStage.SENDING)) {
+                graph.announcements.setSafetyBlocked(stage in setOf(EmergencyStage.COUNTDOWN, EmergencyStage.LOCATING, EmergencyStage.SENDING))
+                if (stage in setOf(EmergencyStage.COUNTDOWN, EmergencyStage.LOCATING, EmergencyStage.SENDING)) {
+                    graph.ble.abortAudioForIncident()
+                } else {
                     graph.detector.reset()
                     simulationDetector.reset()
                 }
@@ -141,6 +155,8 @@ class HelmetGuardService : Service() {
 
     override fun onDestroy() {
         simulationJob?.cancel()
+        callMonitor.stop()
+        graph.announcementAudio.stop()
         scope.cancel()
         super.onDestroy()
     }

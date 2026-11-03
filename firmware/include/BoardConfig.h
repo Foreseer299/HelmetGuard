@@ -7,6 +7,15 @@
 #define HG_PIN_BUZZER 5
 #define HG_PIN_BATTERY_ADC 1
 
+// MAX98357A reference wiring (ESP32-S3 -> amplifier): BCLK, LRC/WS, DIN.
+// SD/MODE may be tied high for mono output. Verify these pins against the final PCB before assembly.
+#define HG_PIN_I2S_BCLK 12
+#define HG_PIN_I2S_LRC 13
+#define HG_PIN_I2S_DOUT 14
+#ifndef HG_ENABLE_I2S_AUDIO
+#define HG_ENABLE_I2S_AUDIO 1
+#endif
+
 // Most 3.3 V active buzzers turn on at HIGH. Set to 0 for active-low hardware.
 #define HG_BUZZER_ACTIVE_HIGH 1
 

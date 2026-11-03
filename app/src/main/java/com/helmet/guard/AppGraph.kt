@@ -2,10 +2,16 @@ package com.helmet.guard
 
 import android.content.Context
 import com.helmet.guard.core.ble.CompanionPairing
+import com.helmet.guard.core.audio.AnnouncementAudioCoordinator
 import com.helmet.guard.core.ble.HelmetBleClient
+import com.helmet.guard.core.call.CallSessionCoordinator
 import com.helmet.guard.core.compatibility.DeviceReliabilityCenter
 import com.helmet.guard.core.detector.AdvancedAccidentDetector
+import com.helmet.guard.core.diagnostics.DiagnosticExporter
+import com.helmet.guard.core.diagnostics.DiagnosticLogger
 import com.helmet.guard.core.location.NativeLocationProvider
+import com.helmet.guard.core.notification.AnnouncementRepository
+import com.helmet.guard.core.notification.AnnouncementSettingsState
 import com.helmet.guard.core.sms.SmsPipeline
 import com.helmet.guard.data.db.GuardDatabase
 import com.helmet.guard.data.prefs.GuardPreferences
@@ -41,10 +47,26 @@ class RuntimeStore {
 class AppGraph(context: Context) {
     private val appContext = context.applicationContext
     val database = GuardDatabase.create(appContext)
+    val diagnostics = DiagnosticLogger(database.logs())
     val preferences = GuardPreferences(appContext)
+    val announcementSettings = AnnouncementSettingsState(preferences)
+    val announcements = AnnouncementRepository()
     val ble = HelmetBleClient(appContext)
+    val diagnosticExporter = DiagnosticExporter(appContext, database.logs(), diagnostics) {
+        val connection = ble.state.value
+        val cap = ble.audioCapabilities.value
+        org.json.JSONObject().apply {
+            put("phase", connection.phase.name); put("mtu", connection.mtu)
+            put("decoderSupported", cap?.decoderSupported); put("outputReady", cap?.outputReady)
+            put("codec", cap?.codec); put("sampleRateHz", cap?.sampleRateHz)
+            put("mode", announcementSettings.state.value.mode)
+            put("safetyBlocked", announcements.safetyBlocked)
+        }.toString()
+    }
+    val announcementAudio = AnnouncementAudioCoordinator(appContext, announcements, announcementSettings, ble, diagnostics)
     val companionPairing = CompanionPairing(appContext)
     val detector = AdvancedAccidentDetector()
+    val callSessions = CallSessionCoordinator(announcements) { announcementSettings.state.value.profile() }
     val location = NativeLocationProvider(appContext)
     val sms = SmsPipeline(appContext, database)
     val recorder = TelemetryRecorder(appContext, database.telemetry())

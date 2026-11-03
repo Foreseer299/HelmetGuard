@@ -20,6 +20,9 @@ import android.os.Build
 import android.os.ParcelUuid
 import android.os.SystemClock
 import androidx.core.content.ContextCompat
+import com.helmet.guard.core.audio.AudioCapabilities
+import com.helmet.guard.core.audio.AudioStatus
+import com.helmet.guard.core.audio.HelmetAudioProtocol
 import com.helmet.guard.domain.ConnectionPhase
 import com.helmet.guard.domain.ConnectionState
 import com.helmet.guard.domain.HelmetDevice
@@ -59,6 +62,10 @@ class HelmetBleClient(private val context: Context) {
     val buttonEvents: SharedFlow<HelmetButton> = _buttonEvents.asSharedFlow()
     private val _packetLoss = MutableStateFlow(0L)
     val packetLoss: StateFlow<Long> = _packetLoss.asStateFlow()
+    private val _audioCapabilities = MutableStateFlow<AudioCapabilities?>(null)
+    val audioCapabilities: StateFlow<AudioCapabilities?> = _audioCapabilities.asStateFlow()
+    private val _audioStatuses = MutableSharedFlow<AudioStatus>(extraBufferCapacity = 64)
+    val audioStatuses: SharedFlow<AudioStatus> = _audioStatuses.asSharedFlow()
 
     private var gatt: BluetoothGatt? = null
     private var targetAddress: String? = null
@@ -72,7 +79,9 @@ class HelmetBleClient(private val context: Context) {
     private var expectedSubscriptions = 0
     private var completedSubscriptions = 0
 
-    private val operations = ArrayDeque<() -> Boolean>()
+    private enum class OperationKind { URGENT_SAFETY, CONTROL, AUDIO }
+    private data class QueuedOperation(val kind: OperationKind, val action: () -> Boolean)
+    private val operations = ArrayDeque<QueuedOperation>()
     private var operationBusy = false
     private var operationTimeout: Job? = null
 
@@ -166,6 +175,7 @@ class HelmetBleClient(private val context: Context) {
         closeCurrentGatt()
         telemetryDecoder.reset()
         eventDecoder.reset()
+        _audioCapabilities.value = null
         sequenceTracker.resetConnection()
         _state.value = ConnectionState(ConnectionPhase.CONNECTING, HelmetDevice(device.name ?: "HelmetGuard", address), message = "正在连接")
         gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -180,6 +190,7 @@ class HelmetBleClient(private val context: Context) {
         clearOperations()
         runCatching { gatt?.disconnect() }
         closeCurrentGatt()
+        _audioCapabilities.value = null
         if (forgetTarget) targetAddress = null
         _state.value = ConnectionState(
             phase = if (targetAddress == null) ConnectionPhase.UNBOUND else ConnectionPhase.DISCONNECTED,
@@ -200,7 +211,10 @@ class HelmetBleClient(private val context: Context) {
         val service = active.getService(HelmetProtocol.SERVICE_UUID) ?: return false
         val characteristic = service.getCharacteristic(HelmetProtocol.COMMAND_UUID) ?: return false
         val bytes = HelmetFrameCodec.command(command, eventId, argument, commandSequence.getAndIncrement())
-        enqueueOperation {
+        val kind = if (command == HelmetProtocol.CMD_ACK_INCIDENT || command == HelmetProtocol.CMD_CANCEL) {
+            OperationKind.URGENT_SAFETY
+        } else OperationKind.CONTROL
+        enqueueOperation(kind) {
             if (active !== gatt) return@enqueueOperation false
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 active.writeCharacteristic(characteristic, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothStatusCodes.SUCCESS
@@ -219,6 +233,78 @@ class HelmetBleClient(private val context: Context) {
     fun syncTime() = sendCommand(HelmetProtocol.CMD_SYNC_TIME, System.currentTimeMillis() / 1_000)
     fun acknowledge(eventId: Long) = sendCommand(HelmetProtocol.CMD_ACK_INCIDENT, eventId)
     fun cancelAlarm(eventId: Long) = sendCommand(HelmetProtocol.CMD_CANCEL, eventId)
+
+    @SuppressLint("MissingPermission")
+    fun requestAudioCapabilities(): Boolean {
+        val active = gatt ?: return false
+        val characteristic = active.getService(HelmetAudioProtocol.SERVICE_UUID)
+            ?.getCharacteristic(HelmetAudioProtocol.CAPABILITIES_UUID) ?: return false
+        enqueueOperation(OperationKind.AUDIO) {
+            active === gatt && active.readCharacteristic(characteristic)
+        }
+        return true
+    }
+
+    fun openAudioSession(sessionId: Long): Boolean =
+        sendAudioControl(HelmetAudioProtocol.OP_OPEN_SESSION, sessionId, 0, ByteArray(0), OperationKind.AUDIO)
+
+    fun queryAudioStatus(sessionId: Long, audioId: Long = 0): Boolean =
+        sendAudioControl(HelmetAudioProtocol.OP_QUERY_STATUS, sessionId, audioId, ByteArray(0), OperationKind.AUDIO)
+
+    fun startAudio(sessionId: Long, audioId: Long, payload: ByteArray): Boolean =
+        sendAudioControl(HelmetAudioProtocol.OP_START_AUDIO, sessionId, audioId, payload, OperationKind.AUDIO)
+
+    fun abortAudio(sessionId: Long, audioId: Long = 0): Boolean {
+        removePendingAudioOperations()
+        return sendAudioControl(HelmetAudioProtocol.OP_ABORT_AUDIO, sessionId, audioId, ByteArray(0), OperationKind.URGENT_SAFETY)
+    }
+
+    fun abortAudioForIncident(): Boolean = abortAudio(0, 0)
+
+    @SuppressLint("MissingPermission")
+    fun writeAudioPacket(packet: ByteArray): Boolean {
+        val active = gatt ?: return false
+        val characteristic = active.getService(HelmetAudioProtocol.SERVICE_UUID)
+            ?.getCharacteristic(HelmetAudioProtocol.DATA_UUID) ?: return false
+        val mtu = _state.value.mtu ?: 23
+        if (packet.size > mtu - 3) return false
+        enqueueOperation(OperationKind.AUDIO) {
+            if (active !== gatt) return@enqueueOperation false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                active.writeCharacteristic(characteristic, packet, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) == BluetoothStatusCodes.SUCCESS
+            } else {
+                @Suppress("DEPRECATION") characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                @Suppress("DEPRECATION") characteristic.value = packet
+                @Suppress("DEPRECATION") active.writeCharacteristic(characteristic)
+            }
+        }
+        return true
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun sendAudioControl(
+        opcode: Int,
+        sessionId: Long,
+        audioId: Long,
+        payload: ByteArray,
+        kind: OperationKind
+    ): Boolean {
+        val active = gatt ?: return false
+        val characteristic = active.getService(HelmetAudioProtocol.SERVICE_UUID)
+            ?.getCharacteristic(HelmetAudioProtocol.CONTROL_UUID) ?: return false
+        val bytes = HelmetAudioProtocol.encodeControl(opcode, sessionId, audioId, payload)
+        enqueueOperation(kind) {
+            if (active !== gatt) return@enqueueOperation false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                active.writeCharacteristic(characteristic, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothStatusCodes.SUCCESS
+            } else {
+                @Suppress("DEPRECATION") characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                @Suppress("DEPRECATION") characteristic.value = bytes
+                @Suppress("DEPRECATION") active.writeCharacteristic(characteristic)
+            }
+        }
+        return true
+    }
 
     private val scanCallback = object : ScanCallback() {
         @SuppressLint("MissingPermission")
@@ -273,7 +359,10 @@ class HelmetBleClient(private val context: Context) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     reconnectAttempt = 0
                     _state.value = _state.value.copy(phase = ConnectionPhase.NEGOTIATING, message = "正在协商通信参数")
-                    if (!callbackGatt.requestMtu(HelmetProtocol.DESIRED_MTU)) discover(callbackGatt)
+                    if (!callbackGatt.requestMtu(HelmetProtocol.DESIRED_MTU)) {
+                        _state.value = _state.value.copy(mtu = 23)
+                        discover(callbackGatt)
+                    }
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> handleDisconnect(callbackGatt, "头盔连接已断开")
             }
@@ -282,7 +371,7 @@ class HelmetBleClient(private val context: Context) {
         @SuppressLint("MissingPermission")
         override fun onMtuChanged(callbackGatt: BluetoothGatt, mtu: Int, status: Int) {
             if (callbackGatt !== gatt) return
-            _state.value = _state.value.copy(mtu = if (status == BluetoothGatt.GATT_SUCCESS) mtu else null)
+            _state.value = _state.value.copy(mtu = if (status == BluetoothGatt.GATT_SUCCESS) mtu else 23)
             discover(callbackGatt)
         }
 
@@ -300,11 +389,17 @@ class HelmetBleClient(private val context: Context) {
                 failWithoutReconnect("该 BLE 设备不是兼容的 HelmetGuard（缺少 FFF0–FFF3 服务）")
                 return
             }
-            expectedSubscriptions = 2
+            val audioService = callbackGatt.getService(HelmetAudioProtocol.SERVICE_UUID)
+            val audioStatus = audioService?.getCharacteristic(HelmetAudioProtocol.STATUS_UUID)
+            val audioComplete = audioService?.getCharacteristic(HelmetAudioProtocol.CAPABILITIES_UUID) != null &&
+                audioService.getCharacteristic(HelmetAudioProtocol.CONTROL_UUID) != null &&
+                audioService.getCharacteristic(HelmetAudioProtocol.DATA_UUID) != null && audioStatus != null
+            expectedSubscriptions = if (audioComplete) 3 else 2
             completedSubscriptions = 0
             _state.value = _state.value.copy(phase = ConnectionPhase.SUBSCRIBING, subscribedCharacteristics = 0, message = "正在订阅安全数据")
             enableNotification(callbackGatt, telemetry)
             enableNotification(callbackGatt, events)
+            if (audioComplete) enableNotification(callbackGatt, audioStatus!!)
         }
 
         override fun onDescriptorWrite(callbackGatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
@@ -318,6 +413,7 @@ class HelmetBleClient(private val context: Context) {
                         subscribedCharacteristics = completedSubscriptions,
                         message = "头盔已连接，等待实时数据"
                     )
+                    requestAudioCapabilities()
                 } else {
                     _state.value = _state.value.copy(subscribedCharacteristics = completedSubscriptions)
                 }
@@ -327,6 +423,22 @@ class HelmetBleClient(private val context: Context) {
         override fun onCharacteristicWrite(callbackGatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
             if (callbackGatt !== gatt) return
             completeOperation(status == BluetoothGatt.GATT_SUCCESS)
+        }
+
+        @Deprecated("Deprecated by Android")
+        override fun onCharacteristicRead(callbackGatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+            if (callbackGatt !== gatt) return
+            @Suppress("DEPRECATION") handleCharacteristicRead(characteristic, characteristic.value, status)
+        }
+
+        override fun onCharacteristicRead(
+            callbackGatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+            status: Int
+        ) {
+            if (callbackGatt !== gatt) return
+            handleCharacteristicRead(characteristic, value, status)
         }
 
         @Deprecated("Deprecated by Android")
@@ -362,7 +474,18 @@ class HelmetBleClient(private val context: Context) {
         }
     }
 
+    private fun handleCharacteristicRead(characteristic: BluetoothGattCharacteristic, bytes: ByteArray, status: Int) {
+        completeOperation(status == BluetoothGatt.GATT_SUCCESS)
+        if (status == BluetoothGatt.GATT_SUCCESS && characteristic.uuid == HelmetAudioProtocol.CAPABILITIES_UUID) {
+            _audioCapabilities.value = HelmetAudioProtocol.decodeCapabilities(bytes)
+        }
+    }
+
     private fun handleBytes(characteristic: BluetoothGattCharacteristic, bytes: ByteArray) {
+        if (characteristic.uuid == HelmetAudioProtocol.STATUS_UUID) {
+            HelmetAudioProtocol.decodeStatus(bytes)?.let { _audioStatuses.tryEmit(it) }
+            return
+        }
         val decoder = if (characteristic.uuid == HelmetProtocol.TELEMETRY_UUID) telemetryDecoder else eventDecoder
         decoder.append(bytes).forEach { frame ->
             if (frame.version != HelmetProtocol.VERSION) return@forEach
@@ -383,9 +506,20 @@ class HelmetBleClient(private val context: Context) {
         }
     }
 
-    private fun enqueueOperation(operation: () -> Boolean) {
-        synchronized(operations) { operations += operation }
+    private fun enqueueOperation(kind: OperationKind = OperationKind.CONTROL, operation: () -> Boolean) {
+        synchronized(operations) {
+            val queued = QueuedOperation(kind, operation)
+            if (kind == OperationKind.URGENT_SAFETY) operations.addFirst(queued) else operations.addLast(queued)
+        }
         processNextOperation()
+    }
+
+    private fun removePendingAudioOperations() {
+        synchronized(operations) {
+            val retained = operations.filterNot { it.kind == OperationKind.AUDIO }
+            operations.clear()
+            retained.forEach(operations::addLast)
+        }
     }
 
     private fun processNextOperation() {
@@ -394,7 +528,7 @@ class HelmetBleClient(private val context: Context) {
             operationBusy = true
             operations.removeFirst()
         }
-        val started = runCatching { operation() }.getOrDefault(false)
+        val started = runCatching { operation.action() }.getOrDefault(false)
         if (!started) {
             completeOperation(false)
             return
@@ -430,6 +564,7 @@ class HelmetBleClient(private val context: Context) {
         gatt = null
         telemetryDecoder.reset()
         eventDecoder.reset()
+        _audioCapabilities.value = null
         _state.value = _state.value.copy(phase = ConnectionPhase.DISCONNECTED, message = message)
         if (!explicitDisconnect) scheduleReconnect()
     }
@@ -452,6 +587,7 @@ class HelmetBleClient(private val context: Context) {
         targetAddress = null
         telemetryDecoder.reset()
         eventDecoder.reset()
+        _audioCapabilities.value = null
         _state.value = _state.value.copy(phase = ConnectionPhase.ERROR, message = message)
     }
 

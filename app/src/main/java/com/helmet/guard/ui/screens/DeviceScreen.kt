@@ -18,16 +18,15 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Battery5Bar
-import androidx.compose.material.icons.outlined.Bluetooth
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.ErrorOutline
-import androidx.compose.material.icons.outlined.GraphicEq
-import androidx.compose.material.icons.outlined.MyLocation
-import androidx.compose.material.icons.outlined.NotificationsActive
-import androidx.compose.material.icons.outlined.Radar
+import androidx.compose.material.icons.outlined.Warning
+import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.LocationOn
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -81,7 +80,7 @@ fun DeviceScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit) 
         item {
             InfoCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Bluetooth, null, tint = GuardBlue, modifier = Modifier.size(40.dp))
+                    Icon(Icons.Outlined.Settings, null, tint = GuardBlue, modifier = Modifier.size(40.dp))
                     Spacer(Modifier.size(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text(connection.device?.name ?: "尚未绑定头盔", style = MaterialTheme.typography.titleMedium)
@@ -105,7 +104,7 @@ fun DeviceScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit) 
                             }
                         }, modifier = Modifier.fillMaxWidth(), enabled = !busy
                     ) {
-                        Icon(if (connection.phase == ConnectionPhase.SCANNING) Icons.Outlined.Radar else Icons.Outlined.Refresh, null)
+                        Icon(if (connection.phase == ConnectionPhase.SCANNING) Icons.Outlined.Search else Icons.Outlined.Refresh, null)
                         Spacer(Modifier.size(8.dp))
                         Text(if (connection.phase == ConnectionPhase.SCANNING) "正在扫描…" else "扫描附近头盔")
                     }
@@ -159,7 +158,7 @@ fun DeviceScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit) 
                     )
                 ) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.Bluetooth, null, tint = if (device.isCompatible) GuardBlue else MaterialTheme.colorScheme.outline)
+                        Icon(Icons.Outlined.Settings, null, tint = if (device.isCompatible) GuardBlue else MaterialTheme.colorScheme.outline)
                         Spacer(Modifier.size(12.dp))
                         Column(Modifier.weight(1f)) {
                             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -188,16 +187,16 @@ fun DeviceScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit) 
         item { SectionTitle("设备自检", "检查蓝牙数据、传感器与定位是否可用") }
         item {
             InfoCard {
-                SelfCheckRow("蓝牙链路", connection.isReady, if (connection.isReady) "通知订阅完成" else connection.message, Icons.Outlined.Bluetooth)
-                SelfCheckRow("IMU 状态", connection.isReady && telemetry?.imuHealthy == true, if (connection.isReady && telemetry?.imuHealthy == true) "MPU6050 正常" else "等待健康帧", Icons.Outlined.GraphicEq)
-                SelfCheckRow("零偏校准", connection.isReady && telemetry?.calibrated == true, if (connection.isReady && telemetry?.calibrated == true) "校准有效" else "需要校准", Icons.Outlined.Tune)
-                SelfCheckRow("实时数据", connection.isReady && connection.lastPacketElapsedMs > 0, "累计疑似丢帧 $loss", Icons.Outlined.NotificationsActive)
-                SelfCheckRow("定位能力", graph.location.hasForegroundPermission() && graph.location.isLocationEnabled(), "事故发生时使用系统原生定位", Icons.Outlined.MyLocation)
+                SelfCheckRow("蓝牙链路", connection.isReady, if (connection.isReady) "通知订阅完成" else connection.message, Icons.Outlined.Settings)
+                SelfCheckRow("IMU 状态", connection.isReady && telemetry?.imuHealthy == true, if (connection.isReady && telemetry?.imuHealthy == true) "MPU6050 正常" else "等待健康帧", Icons.Outlined.Build)
+                SelfCheckRow("零偏校准", connection.isReady && telemetry?.calibrated == true, if (connection.isReady && telemetry?.calibrated == true) "校准有效" else "需要校准", Icons.Outlined.Settings)
+                SelfCheckRow("实时数据", connection.isReady && connection.lastPacketElapsedMs > 0, "累计疑似丢帧 $loss", Icons.Outlined.Notifications)
+                SelfCheckRow("定位能力", graph.location.hasForegroundPermission() && graph.location.isLocationEnabled(), "事故发生时使用系统原生定位", Icons.Outlined.LocationOn)
                 SelfCheckRow(
                     "头盔电量",
                     (telemetry?.takeIf { it.batteryValid }?.batteryPercent ?: 0) >= 20,
                     telemetry?.takeIf { it.batteryValid }?.let { "当前 ${it.batteryPercent}%" } ?: "设备尚未提供有效电量",
-                    Icons.Outlined.Battery5Bar
+                    Icons.Outlined.Info
                 )
             }
         }
@@ -221,7 +220,7 @@ private fun SelfCheckRow(title: String, passed: Boolean, detail: String, icon: a
             Text(title, fontWeight = FontWeight.SemiBold)
             Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Icon(if (passed) Icons.Outlined.CheckCircle else Icons.Outlined.ErrorOutline, null, tint = if (passed) GuardGreen else GuardOrange)
+        Icon(if (passed) Icons.Outlined.CheckCircle else Icons.Outlined.Warning, null, tint = if (passed) GuardGreen else GuardOrange)
     }
 }
 

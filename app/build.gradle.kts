@@ -15,16 +15,29 @@ android {
 
     defaultConfig {
         applicationId = "com.helmet.guard"
-        minSdk = 26
+        minSdk = 31
         targetSdk = 35
-        versionCode = 30
-        versionName = "2.1.0"
+        versionCode = 43
+        versionName = "2.2.0-alpha04"
+        manifestPlaceholders["appLabel"] = "HelmetGuard"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk.abiFilters += setOf("arm64-v8a")
         vectorDrawables.useSupportLibrary = true
     }
 
+    signingConfigs.getByName("debug") {
+        providers.environmentVariable("HELMETGUARD_DEBUG_STORE").orNull?.let {
+            storeFile = file(it)
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
     buildTypes {
-        debug { applicationIdSuffix = ".debug" }
+        debug {
+            applicationIdSuffix = ".debug"
+            manifestPlaceholders["appLabel"] = "HelmetGuard"
+        }
         release {
             isMinifyEnabled = true
             proguardFiles(
@@ -43,9 +56,13 @@ android {
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true; buildConfig = true }
     packaging.resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+    androidResources.noCompress += listOf("onnx", "fst", "txt")
 }
 
 dependencies {
+    val embeddedTtsAar = file("libs/sherpa-onnx-1.13.8.aar")
+    if (embeddedTtsAar.exists()) implementation(files(embeddedTtsAar))
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
@@ -56,7 +73,7 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
-    implementation(libs.androidx.material.icons.extended)
+    implementation(libs.androidx.material.icons.core)
     implementation(libs.androidx.navigation.compose)
 
     implementation(libs.androidx.room.runtime)

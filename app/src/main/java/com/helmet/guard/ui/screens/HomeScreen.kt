@@ -16,14 +16,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Battery5Bar
-import androidx.compose.material.icons.outlined.BluetoothConnected
-import androidx.compose.material.icons.outlined.ContactEmergency
-import androidx.compose.material.icons.outlined.Speed
-import androidx.compose.material.icons.outlined.HealthAndSafety
-import androidx.compose.material.icons.outlined.QueryStats
-import androidx.compose.material.icons.outlined.Sensors
-import androidx.compose.material.icons.outlined.WarningAmber
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Call
+import androidx.compose.material.icons.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.Favorite
+import androidx.compose.material.icons.outlined.List
+import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -114,7 +114,7 @@ fun HomeScreen(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(52.dp).background(Color.White.copy(alpha = 0.16f), CircleShape), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Outlined.HealthAndSafety, null, tint = Color.White, modifier = Modifier.size(29.dp))
+                            Icon(Icons.Outlined.Favorite, null, tint = Color.White, modifier = Modifier.size(29.dp))
                         }
                         Spacer(Modifier.size(14.dp))
                         Column(Modifier.weight(1f)) {
@@ -148,14 +148,14 @@ fun HomeScreen(
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                MetricCard(Icons.Outlined.Speed, "合加速度", sample?.let { String.format("%.2f", it.accelerationG) } ?: "--", "g", GuardBlue, Modifier.weight(1f))
-                MetricCard(Icons.Outlined.QueryStats, "角速度", sample?.let { String.format("%.0f", it.angularSpeedDps) } ?: "--", "°/s", GuardCyan, Modifier.weight(1f))
+                MetricCard(Icons.Outlined.ArrowForward, "合加速度", sample?.let { String.format("%.2f", it.accelerationG) } ?: "--", "g", GuardBlue, Modifier.weight(1f))
+                MetricCard(Icons.Outlined.List, "角速度", sample?.let { String.format("%.0f", it.angularSpeedDps) } ?: "--", "°/s", GuardCyan, Modifier.weight(1f))
             }
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                MetricCard(Icons.Outlined.Battery5Bar, "头盔电量", sample?.takeIf { it.batteryValid }?.batteryPercent?.toString() ?: "--", if (sample?.batteryValid == true) "%" else "暂无数据", GuardGreen, Modifier.weight(1f))
-                MetricCard(Icons.Outlined.Sensors, "事故置信度", "${(detector.confidence * 100).toInt()}", "%", GuardOrange, Modifier.weight(1f))
+                MetricCard(Icons.Outlined.Info, "头盔电量", sample?.takeIf { it.batteryValid }?.batteryPercent?.toString() ?: "--", if (sample?.batteryValid == true) "%" else "暂无数据", GuardGreen, Modifier.weight(1f))
+                MetricCard(Icons.Outlined.Build, "事故置信度", "${(detector.confidence * 100).toInt()}", "%", GuardOrange, Modifier.weight(1f))
             }
         }
         item {
@@ -184,7 +184,7 @@ fun HomeScreen(
         item {
             InfoCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(if (failedChecks == 0) Icons.Outlined.BluetoothConnected else Icons.Outlined.WarningAmber, null, tint = if (failedChecks == 0) GuardGreen else GuardOrange)
+                    Icon(if (failedChecks == 0) Icons.Outlined.CheckCircle else Icons.Outlined.Warning, null, tint = if (failedChecks == 0) GuardGreen else GuardOrange)
                     Spacer(Modifier.size(10.dp))
                     Column(Modifier.weight(1f)) {
                         Text(if (failedChecks == 0) "求救链路准备就绪" else "还有 $failedChecks 项可靠性设置待完成", fontWeight = FontWeight.SemiBold)
@@ -192,7 +192,7 @@ fun HomeScreen(
                     }
                 }
                 OutlinedButton(onClick = openContacts, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Outlined.ContactEmergency, null)
+                    Icon(Icons.Outlined.Call, null)
                     Spacer(Modifier.size(8.dp))
                     Text("管理紧急联系人")
                 }
@@ -200,7 +200,7 @@ fun HomeScreen(
         }
         item {
             OutlinedButton(onClick = { confirmSos = true }, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Outlined.WarningAmber, null, tint = GuardRed)
+                Icon(Icons.Outlined.Warning, null, tint = GuardRed)
                 Spacer(Modifier.size(8.dp))
                 Text("手动触发紧急求救", color = GuardRed)
             }
@@ -211,7 +211,7 @@ fun HomeScreen(
     if (confirmSos) {
         AlertDialog(
             onDismissRequest = { confirmSos = false },
-            icon = { Icon(Icons.Outlined.WarningAmber, null, tint = GuardRed) },
+            icon = { Icon(Icons.Outlined.Warning, null, tint = GuardRed) },
             title = { Text("启动紧急求救？") },
             text = { Text("将进入 5 秒倒计时。倒计时结束后会定位并向所有启用的紧急联系人发送真实短信。") },
             confirmButton = {

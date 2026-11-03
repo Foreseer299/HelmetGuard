@@ -14,7 +14,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.AlertDialog
@@ -91,7 +91,7 @@ fun ContactsScreen(graph: AppGraph, back: () -> Unit) {
                 }
                 Row {
                     TextButton(onClick = { editing = contact; showEditor = true }, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.Edit, null); Text("编辑") }
-                    TextButton(onClick = { deleting = contact }, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.DeleteOutline, null, tint = GuardRed); Text("删除", color = GuardRed) }
+                    TextButton(onClick = { deleting = contact }, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.Delete, null, tint = GuardRed); Text("删除", color = GuardRed) }
                 }
             }
         }
