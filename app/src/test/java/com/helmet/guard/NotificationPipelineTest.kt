@@ -54,7 +54,7 @@ class NotificationPipelineTest {
         assertEquals(AnnouncementDecision.REDACTED_ONLY, result.decision)
         assertEquals(RiderEventCategory.SMS_MESSAGE, result.announcement!!.category)
         assertFalse(result.announcement!!.speechText.contains("839204"))
-        assertTrue(result.announcement!!.speechText.contains("已隐藏"))
+        assertEquals("未知来源短信", result.announcement!!.speechText)
     }
 
     @Test
@@ -199,6 +199,39 @@ class NotificationPipelineTest {
         assertTrue(repo.permits("new", repo.epoch))
         repo.revoke("new")
         assertFalse(repo.permits("new", repo.epoch))
+    }
+
+    @Test fun smsModesOnlyReadBodiesForMatchedContacts() {
+        val sms = NotificationNormalizer.normalize(raw("sms-case", "小明", "我已经到门口了", 9000, packageName = "sms"), config)!!.copy(senderLabel = "小明", senderContactMatched = true)
+        val modes = com.helmet.guard.domain.CommunicationSpeechMode.entries
+        assertEquals("收到短信", AnnouncementPolicy.evaluate(sms, AnnouncementProfile(smsSpeechMode = modes[0])).announcement!!.speechText)
+        assertEquals("小明发来短信", AnnouncementPolicy.evaluate(sms, AnnouncementProfile(smsSpeechMode = modes[1])).announcement!!.speechText)
+        assertTrue(AnnouncementPolicy.evaluate(sms, AnnouncementProfile(smsSpeechMode = modes[2])).announcement!!.speechText.contains("我已经到门口了"))
+        assertEquals("小明发来短信", AnnouncementPolicy.evaluate(sms.copy(senderContactMatched = false), AnnouncementProfile(smsSpeechMode = modes[2])).announcement!!.speechText)
+    }
+
+    @Test fun maskedSmsStillProducesUnknownSourceNotice() {
+        val sms = NotificationNormalizer.normalize(raw("hidden", "", "", 9010, packageName = "sms"), config)!!
+        assertFalse(sms.bodyReadable)
+        assertEquals("未知来源短信", AnnouncementPolicy.evaluate(sms).announcement!!.speechText)
+    }
+
+    @Test fun otpBodyNeverSpokenEvenForSavedContact() {
+        val sms = NotificationNormalizer.normalize(raw("otp-contact", "小明", "验证码839204", 9020, packageName = "sms"), config)!!.copy(senderLabel = "小明", senderContactMatched = true)
+        val profile = AnnouncementProfile(smsSpeechMode = com.helmet.guard.domain.CommunicationSpeechMode.CONTACT_BODY)
+        assertEquals("小明发来短信", AnnouncementPolicy.evaluate(sms, profile).announcement!!.speechText)
+    }
+
+    @Test fun separateUnknownSmsMessagesDoNotMergeBecauseSpokenTextMatches() {
+        val one = AnnouncementPolicy.evaluate(NotificationNormalizer.normalize(raw("sms1", "短信", "第一条", 9030, packageName = "sms"), config)!!).announcement!!
+        val two = AnnouncementPolicy.evaluate(NotificationNormalizer.normalize(raw("sms2", "短信", "第二条", 9031, packageName = "sms"), config)!!).announcement!!
+        assertNotEquals(one.fingerprint, two.fingerprint)
+    }
+
+    @Test fun callerCanChooseGenericOrVisibleIdentity() {
+        val call = NotificationNormalizer.normalize(raw("call-mode", "小明", "来电", 9040, packageName = "dialer"), config)!!.copy(senderLabel = "小明")
+        assertEquals("小明来电", AnnouncementPolicy.evaluate(call).announcement!!.speechText)
+        assertEquals("有来电", AnnouncementPolicy.evaluate(call, AnnouncementProfile(callSpeechMode = com.helmet.guard.domain.CommunicationSpeechMode.NOTICE)).announcement!!.speechText)
     }
 
     private fun normalize(title: String, text: String, elapsed: Long) =

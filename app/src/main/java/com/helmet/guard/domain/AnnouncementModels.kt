@@ -15,7 +15,10 @@ data class NotificationEvent(
     val isGroupSummary: Boolean,
     val isOngoing: Boolean,
     val source: AnnouncementSource,
-    val businessKey: String? = null
+    val businessKey: String? = null,
+    val senderLabel: String? = null,
+    val senderContactMatched: Boolean = false,
+    val bodyReadable: Boolean = true
 )
 
 enum class AnnouncementSource { SMS, CALL, RIDER_APP, UNKNOWN }
@@ -37,6 +40,8 @@ enum class RiderEventCategory {
 enum class AnnouncementPriority(val rank: Int) {
     LOW(10), NORMAL(20), IMPORTANT(30), CALL(40), SAFETY(100)
 }
+
+enum class CommunicationSpeechMode { NOTICE, SOURCE, CONTACT_BODY }
 
 enum class ContentDetail { HINT_ONLY, BRIEF, STANDARD, DETAILED, CUSTOM }
 
@@ -63,6 +68,8 @@ data class AnnouncementEvaluation(
 
 data class AnnouncementProfile(
     val enabled: Boolean = true,
+    val smsSpeechMode: CommunicationSpeechMode = CommunicationSpeechMode.SOURCE,
+    val callSpeechMode: CommunicationSpeechMode = CommunicationSpeechMode.SOURCE,
     val detail: ContentDetail = ContentDetail.STANDARD,
     val maxCharacters: Int = 48,
     val maxQueueAgeMs: Long = 60_000,

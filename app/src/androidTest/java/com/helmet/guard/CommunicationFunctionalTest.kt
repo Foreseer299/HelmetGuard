@@ -50,9 +50,10 @@ class CommunicationFunctionalTest {
         graph.announcements.setSafetyBlocked(false)
         graph.announcements.clear()
         graph.preferences.setAnnouncementMode("RIDER")
+        graph.preferences.setAnnouncementSources(true, true, true)
         graph.preferences.setAnnouncementsEnabled(true)
         graph.preferences.setRiderPackageEnabled("com.android.shell", true)
-        withTimeout(3000) { while (graph.announcementSettings.state.value.riderPackages.isEmpty() || !graph.announcementSettings.state.value.enabled || graph.announcementSettings.state.value.mode != "RIDER") delay(20) }
+        withTimeout(3000) { while (graph.announcementSettings.state.value.riderPackages.isEmpty() || !graph.announcementSettings.state.value.enabled || !graph.announcementSettings.state.value.riderApps || graph.announcementSettings.state.value.mode != "RIDER") delay(20) }
         withTimeout(25000) { while (!com.helmet.guard.core.notification.HelmetNotificationListener.connected.value) delay(50) }
         val stamp = SystemClock.elapsedRealtime()
         shell("cmd notification post -t '新订单' hg-test-$stamp '有新订单，请及时接单'")

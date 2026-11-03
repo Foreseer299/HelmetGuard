@@ -1,4 +1,4 @@
-> 当前接手版本：**2.2.0-alpha04**。功能及安装说明见 [alpha04发布说明](docs/RELEASE_2.2_ALPHA04.md)，验证证据见 [测试记录](docs/TEST_RESULTS_ALPHA04.md)，手机/硬件联调见 [联调指南](docs/PHONE_AND_HELMET_TEST_GUIDE.md)。下方保留2.1基线说明。
+> 当前版本：**2.3.0**。安装与改动见 [2.3 发布说明](docs/RELEASE_2.3.0.md)，验证见 [2.3 测试记录](docs/TEST_RESULTS_2.3.0.md)，手机/硬件联调见 [联调指南](docs/PHONE_AND_HELMET_TEST_GUIDE.md)。历史版本说明保留供查阅。
 
 # HelmetGuard 2.2.0-alpha01
 

@@ -22,6 +22,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -39,8 +42,11 @@ class AnnouncementAudioCoordinator(
 ) {
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val _playbackState = kotlinx.coroutines.flow.MutableStateFlow("尚无播报记录")
+    val playbackState: kotlinx.coroutines.flow.StateFlow<String> = _playbackState
     private var tts: LocalTtsSynthesizer? = null
     private val random = SecureRandom()
+    private val phonePlayer = PhoneTestPlayer(appContext)
     private var job: Job? = null
     private var activeJob: Job? = null
     private var activeAnnouncement: Announcement? = null
@@ -51,6 +57,16 @@ class AnnouncementAudioCoordinator(
         job = scope.launch {
             coroutineScope {
                 val wakeup = Channel<Unit>(Channel.CONFLATED)
+                launch(start = CoroutineStart.UNDISPATCHED) {
+                    settings.state.map { config -> listOf(config.enabled, config.mode, config.calls, config.sms,
+                        config.riderApps, config.riderPackages, config.smsSpeechMode, config.callSpeechMode,
+                        config.phoneTestPlayback, config.hideVerificationCodes, config.mutedCategories) }
+                        .distinctUntilChanged().drop(1).collect {
+                            activeJob?.cancel()
+                            repository.clear()
+                            ble.abortAudioForIncident()
+                        }
+                }
                 launch(start = CoroutineStart.UNDISPATCHED) {
                     repository.cancellations.collect { trace ->
                         if (trace == null || activeAnnouncement?.traceId == trace) {
@@ -103,21 +119,7 @@ class AnnouncementAudioCoordinator(
         val config = settings.state.value
         if (!repository.permits(announcement.traceId, epoch) || SystemClock.elapsedRealtime() >= announcement.expiresAtElapsedMs) return log(announcement, "NOT_PLAYED_CONFIRMED", "EXPIRED_OR_INCIDENT")
         if (!config.enabled || !config.allows(announcement.source)) return log(announcement, "NOT_PLAYED_CONFIRMED", "PROFILE_DISABLED")
-        if (ble.state.value.phase != ConnectionPhase.READY) return log(announcement, "NOT_PLAYED_CONFIRMED", "HELMET_NOT_READY")
-        val capabilities = ble.audioCapabilities.value
-            ?: return log(announcement, "NOT_PLAYED_CONFIRMED", "AUDIO_CAPABILITIES_UNAVAILABLE")
-        if (!capabilities.decoderSupported || !capabilities.outputReady) {
-            return log(announcement, "NOT_PLAYED_CONFIRMED", "HELMET_OUTPUT_UNAVAILABLE")
-        }
-        if (capabilities.codec != HelmetAudioProtocol.CODEC_IMA_ADPCM_BLOCK_V1 ||
-            capabilities.sampleRateHz != HelmetAudioProtocol.SAMPLE_RATE_HZ ||
-            capabilities.blockSamples != HelmetAudioProtocol.BLOCK_SAMPLES ||
-            capabilities.startupBlocks < HelmetAudioProtocol.requiredBlocksForBuffer(HelmetAudioProtocol.DEFAULT_START_BUFFER_MS)
-        ) return log(announcement, "NOT_PLAYED_CONFIRMED", "CAPABILITY_MISMATCH")
-        val mtu = ble.state.value.mtu ?: return log(announcement, "NOT_PLAYED_CONFIRMED", "MTU_UNKNOWN")
-        if (mtu < HelmetAudioProtocol.MINIMUM_DYNAMIC_AUDIO_MTU) {
-            return log(announcement, "NOT_PLAYED_CONFIRMED", "MTU_TOO_SMALL", mapOf("mtu" to mtu))
-        }
+        if (!helmetReady() && !config.phoneTestPlayback) return log(announcement, "NOT_PLAYED_CONFIRMED", "NO_HELMET_PHONE_TEST_OFF")
 
         val synthesizer = tts ?: return log(announcement, "NOT_PLAYED_CONFIRMED", "TTS_UNAVAILABLE")
         val synthesisStarted = SystemClock.elapsedRealtime()
@@ -140,7 +142,17 @@ class AnnouncementAudioCoordinator(
         if (!repository.permits(announcement.traceId, epoch) || SystemClock.elapsedRealtime() >= announcement.expiresAtElapsedMs) return log(announcement, "NOT_PLAYED_CONFIRMED", "EXPIRED_OR_INCIDENT")
         if (!settings.state.value.enabled || !settings.state.value.allows(announcement.source)) return log(announcement, "NOT_PLAYED_CONFIRMED", "SOURCE_DISABLED")
         log(announcement, "TTS_COMPLETED", "LOCAL_SYNTHESIS", mapOf("durationMs" to SystemClock.elapsedRealtime() - synthesisStarted, "samples" to pcm.size))
-        val blocks = ImaAdpcmCodec.encode(pcm.take(HelmetAudioProtocol.SAMPLE_RATE_HZ * 12).toShortArray()).map { it.toByteArray() }
+        val limited = pcm.take(HelmetAudioProtocol.SAMPLE_RATE_HZ * 12).toShortArray()
+        if (!helmetReady()) {
+            if (!settings.state.value.phoneTestPlayback) return log(announcement, "NOT_PLAYED_CONFIRMED", "PHONE_TEST_DISABLED")
+            log(announcement, "PHONE_TEST_STARTED", "NO_READY_HELMET", mapOf("samples" to limited.size))
+            val played = phonePlayer.play(limited) { settings.state.value.phoneTestPlayback && settings.state.value.enabled && settings.state.value.allows(announcement.source) && repository.permits(announcement.traceId, epoch) }
+            log(announcement, "PHONE_TEST_PLAYED", "PLAYBACK_HEAD_COMPLETED", mapOf("playedSamples" to played))
+            return
+        }
+        val capabilities = ble.audioCapabilities.value ?: return
+        val mtu = ble.state.value.mtu ?: return
+        val blocks = ImaAdpcmCodec.encode(limited).map { it.toByteArray() }
         if (blocks.isEmpty() || blocks.any { it.size > capabilities.maximumBlockBytes || it.size + HelmetAudioProtocol.DATA_FIXED_OVERHEAD_BYTES > mtu - 3 }) {
             return log(announcement, "NOT_PLAYED_CONFIRMED", "ENCODED_BLOCK_TOO_LARGE")
         }
@@ -261,6 +273,14 @@ class AnnouncementAudioCoordinator(
         }
     }
 
+    private fun helmetReady(): Boolean {
+        val cap = ble.audioCapabilities.value ?: return false
+        return ble.state.value.phase == ConnectionPhase.READY && cap.decoderSupported && cap.outputReady &&
+            cap.codec == HelmetAudioProtocol.CODEC_IMA_ADPCM_BLOCK_V1 && cap.sampleRateHz == HelmetAudioProtocol.SAMPLE_RATE_HZ &&
+            cap.blockSamples == HelmetAudioProtocol.BLOCK_SAMPLES && cap.startupBlocks >= HelmetAudioProtocol.requiredBlocksForBuffer(800) &&
+            (ble.state.value.mtu ?: 23) >= HelmetAudioProtocol.MINIMUM_DYNAMIC_AUDIO_MTU
+    }
+
     private fun randomNonZeroU32(): Long {
         var value: Long
         do value = random.nextInt().toLong() and 0xffff_ffffL while (value == 0L)
@@ -268,6 +288,17 @@ class AnnouncementAudioCoordinator(
     }
 
     private fun log(announcement: Announcement, result: String, reason: String, metrics: Map<String, Any?> = emptyMap()) {
+        _playbackState.value = when {
+            reason == "NO_HELMET_PHONE_TEST_OFF" -> "已捕获；无可用头盔，手机测试播报未开启"
+            result == "PHONE_TEST_PLAYED" -> "手机测试播报已完成"
+            result == "PHONE_TEST_STARTED" -> "正在手机上测试播报"
+            result == "PLAYED_CONFIRMED" -> "头盔已确认播放完成"
+            result == "PLAYBACK_RESULT_UNKNOWN" -> "头盔播放结果未确认"
+            result == "TTS_STARTED" -> "正在生成离线语音"
+            result == "CANCELLED" -> "提醒已被中断或撤销"
+            result == "ERROR" -> "提醒失败，请导出诊断日志"
+            else -> _playbackState.value
+        }
         diagnostics.log(announcement.traceId, "audio", announcement.category.name, result, metrics = metrics + ("reason" to reason))
     }
 

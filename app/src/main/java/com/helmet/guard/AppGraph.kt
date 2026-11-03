@@ -60,6 +60,13 @@ class AppGraph(context: Context) {
             put("decoderSupported", cap?.decoderSupported); put("outputReady", cap?.outputReady)
             put("codec", cap?.codec); put("sampleRateHz", cap?.sampleRateHz)
             put("mode", announcementSettings.state.value.mode)
+            put("phoneTestPlayback", announcementSettings.state.value.phoneTestPlayback)
+            put("smsSpeechMode", announcementSettings.state.value.smsSpeechMode.name)
+            put("callSpeechMode", announcementSettings.state.value.callSpeechMode.name)
+            put("reminderServiceRunning", com.helmet.guard.service.AnnouncementService.running.value)
+            put("notificationListenerConnected", com.helmet.guard.core.notification.HelmetNotificationListener.connected.value)
+            put("contactsPermission", androidx.core.content.ContextCompat.checkSelfPermission(appContext, android.Manifest.permission.READ_CONTACTS) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+            put("phoneStatePermission", androidx.core.content.ContextCompat.checkSelfPermission(appContext, android.Manifest.permission.READ_PHONE_STATE) == android.content.pm.PackageManager.PERMISSION_GRANTED)
             put("safetyBlocked", announcements.safetyBlocked)
         }.toString()
     }

@@ -17,8 +17,8 @@ android {
         applicationId = "com.helmet.guard"
         minSdk = 31
         targetSdk = 35
-        versionCode = 43
-        versionName = "2.2.0-alpha04"
+        versionCode = 50
+        versionName = "2.3.0"
         manifestPlaceholders["appLabel"] = "HelmetGuard"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk.abiFilters += setOf("arm64-v8a")
