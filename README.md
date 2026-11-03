@@ -1,4 +1,4 @@
-> 当前版本：**2.3.0**。安装与改动见 [2.3 发布说明](docs/RELEASE_2.3.0.md)，验证见 [2.3 测试记录](docs/TEST_RESULTS_2.3.0.md)，手机/硬件联调见 [联调指南](docs/PHONE_AND_HELMET_TEST_GUIDE.md)。历史版本说明保留供查阅。
+> 当前版本：**2.3.1**。通知监听恢复见 [补丁说明](docs/RELEASE_2.3.1.md) 和 [测试记录](docs/TEST_RESULTS_2.3.1.md)；短信/来电选项见 [2.3说明](docs/RELEASE_2.3.0.md)。
 
 # HelmetGuard 2.2.0-alpha01
 

@@ -40,6 +40,12 @@ class AnnouncementService : Service() {
         running.value = true
         graph.announcementAudio.start()
         scope.launch {
+            while (isActive) {
+                com.helmet.guard.core.notification.NotificationListenerRecovery.reconnect(this@AnnouncementService, "SERVICE_CHECK")
+                delay(15_000)
+            }
+        }
+        scope.launch {
             graph.incidents.state.map { it.stage }.distinctUntilChanged().collect { stage ->
                 val blocked = stage in setOf(EmergencyStage.COUNTDOWN, EmergencyStage.LOCATING, EmergencyStage.SENDING)
                 graph.announcements.setSafetyBlocked(blocked)
@@ -51,7 +57,10 @@ class AnnouncementService : Service() {
         }
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (running.value) calls.start()
+        if (running.value) {
+            calls.start()
+            com.helmet.guard.core.notification.NotificationListenerRecovery.reconnect(this, "SERVICE_START")
+        }
         return START_STICKY
     }
     override fun onDestroy() {

@@ -23,12 +23,24 @@ class HelmetNotificationListener : NotificationListenerService() {
     private val revisions = ConcurrentHashMap<String, Long>()
     private val sequence = AtomicLong()
     private val submitted = ConcurrentHashMap<String, String>()
-    override fun onDestroy() { connected.value = false; processing.cancel(); super.onDestroy() }
+    override fun onDestroy() {
+        connected.value = false
+        appGraph.diagnostics.log("listener", "notification_listener", "LIFECYCLE", "DESTROYED")
+        processing.cancel(); super.onDestroy()
+    }
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         sbn?.key?.let { key -> revisions.remove(key); submitted.remove(key)?.let { appGraph.announcements.revoke(it) } }
     }
-    override fun onListenerConnected() { super.onListenerConnected(); connected.value = true }
-    override fun onListenerDisconnected() { connected.value = false; super.onListenerDisconnected() }
+    override fun onListenerConnected() {
+        super.onListenerConnected(); connected.value = true
+        NotificationListenerRecovery.refresh(this)
+        appGraph.diagnostics.log("listener", "notification_listener", "LIFECYCLE", "CONNECTED")
+    }
+    override fun onListenerDisconnected() {
+        connected.value = false; super.onListenerDisconnected()
+        appGraph.diagnostics.log("listener", "notification_listener", "LIFECYCLE", "DISCONNECTED")
+        NotificationListenerRecovery.reconnect(this, "DISCONNECT")
+    }
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         val item = sbn ?: return
         val notification = item.notification ?: return

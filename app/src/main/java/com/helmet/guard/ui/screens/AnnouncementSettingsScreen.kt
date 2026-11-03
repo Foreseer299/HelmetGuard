@@ -107,7 +107,9 @@ fun AnnouncementSettingsScreen(graph: AppGraph, onBack: () -> Unit) {
     DisposableEffect(tts) { onDispose { tts.shutdown() } }
 
     val listenerConnected by com.helmet.guard.core.notification.HelmetNotificationListener.connected.collectAsState()
-    val notificationAccess = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+    val listenerRecovery by com.helmet.guard.core.notification.NotificationListenerRecovery.state.collectAsState()
+    val notificationAccess = listenerRecovery.accessGranted
+    LaunchedEffect(Unit) { com.helmet.guard.core.notification.NotificationListenerRecovery.refresh(context) }
 
     LaunchedEffect(sourceDialog) {
         if (sourceDialog) installedSources = withContext(Dispatchers.IO) {
@@ -168,7 +170,16 @@ fun AnnouncementSettingsScreen(graph: AppGraph, onBack: () -> Unit) {
                         onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
                         modifier = Modifier.fillMaxWidth()
                     ) { Icon(Icons.Outlined.Notifications, null); Text(" 打开通知使用权") }
-                    Text(if (listenerConnected) "通知监听：运行中" else "通知监听：等待系统连接")
+                    Text(if (listenerConnected) "通知监听：运行中" else "通知监听：未连接，当前收不到短信通知",
+                        color = if (listenerConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+                    if (!listenerConnected) {
+                        Text(if (notificationAccess) "系统已授权但尚未连接。可尝试重连；若仍失败，请在通知使用权中关闭后重新允许 HelmetGuard。" else "请先在系统通知使用权中允许 HelmetGuard；启用通讯服务不能替代此授权。")
+                        if (notificationAccess) OutlinedButton(onClick = {
+                            com.helmet.guard.core.notification.NotificationListenerRecovery.reconnect(context, "USER_RETRY", manual = true)
+                        }) { Text("重连通知监听") }
+                        if (listenerRecovery.result == "REBIND_REQUESTED") Text("已请求系统重连，等待实际连接回调")
+                        if (listenerRecovery.result == "REBIND_FAILED") Text("系统拒绝重连，请重新授予通知使用权")
+                    }
                     Text("连接状态：${graph.ble.state.collectAsState().value.message}", style = MaterialTheme.typography.bodyMedium)
                 }
             }
