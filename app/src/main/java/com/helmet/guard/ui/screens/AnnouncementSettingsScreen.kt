@@ -1,6 +1,13 @@
 package com.helmet.guard.ui.screens
 
 import android.content.Intent
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import com.helmet.guard.domain.CommunicationSpeechMode
+import com.helmet.guard.service.AnnouncementService
 import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -69,6 +76,13 @@ fun AnnouncementSettingsScreen(graph: AppGraph, onBack: () -> Unit) {
     var sourceDialog by remember { mutableStateOf(false) }
     var installedSources by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     val recent by graph.announcements.lastEvaluation.collectAsState()
+    val playbackState by graph.announcementAudio.playbackState.collectAsState()
+    val phoneTest by graph.preferences.phoneTestPlayback.collectAsState(initial = false)
+    val smsMode by graph.preferences.smsSpeechMode.collectAsState(initial = "SOURCE")
+    val callMode by graph.preferences.callSpeechMode.collectAsState(initial = "SOURCE")
+    var permissionRevision by remember { mutableStateOf(0) }
+    val contactsPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { permissionRevision++ }
+    val phonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { permissionRevision++; if (enabledFrom(graph)) AnnouncementService.start(context) }
     val enabled by graph.preferences.announcementsEnabled.collectAsState(initial = false)
     val detailName by graph.preferences.announcementDetail.collectAsState(initial = ContentDetail.STANDARD.name)
     val selectedVoice by graph.preferences.ttsVoiceName.collectAsState(initial = "")
@@ -138,9 +152,17 @@ fun AnnouncementSettingsScreen(graph: AppGraph, onBack: () -> Unit) {
             item { SectionTitle("状态", "通知在手机本地处理，不上传正文") }
             item {
                 InfoCard {
-                    SettingSwitch("启用骑行播报", "仅在守护开启且头盔连接时进入音频队列", enabled) {
-                        scope.launch { graph.preferences.setAnnouncementsEnabled(it) }
+                    SettingSwitch("启用通讯提醒", "按下方设置处理短信、来电和骑手通知", enabled) { value ->
+                        scope.launch {
+                            graph.preferences.setAnnouncementsEnabled(value)
+                            if (value) AnnouncementService.start(context) else AnnouncementService.stop(context)
+                        }
                     }
+                    SettingSwitch("手机测试播报", "仅用于无头盔测试；无可用头盔时由手机出声，默认关闭", phoneTest) { value ->
+                        scope.launch { graph.preferences.setPhoneTestPlayback(value) }
+                    }
+                    val reminderRunning by AnnouncementService.running.collectAsState()
+                    Text(if (reminderRunning) "提醒服务：运行中" else "提醒服务：未运行，请重新开启通讯提醒")
                     Text(if (notificationAccess) "通知使用权：已授权" else "通知使用权：未授权", color = if (notificationAccess) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
                     OutlinedButton(
                         onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
@@ -151,26 +173,56 @@ fun AnnouncementSettingsScreen(graph: AppGraph, onBack: () -> Unit) {
                 }
             }
 
-            item { SectionTitle("通知来源", "只处理你开启的来源") }
+            item { SectionTitle("来电提醒") }
             item {
                 InfoCard {
-                    SettingSwitch("来电", "接听或挂断后停止待播提醒", calls) {
+                    SettingSwitch("提醒来电", "接听或挂断后停止待播提醒", calls) {
                         scope.launch { graph.preferences.setAnnouncementSources(it, sms, riderApps) }
                     }
-                    SettingSwitch("短信", "验证码和敏感数字默认隐藏", sms) {
+                    if (calls) {
+                        SpeechChoice("简短提醒", "只说“有来电”", callMode == "NOTICE") { scope.launch { graph.preferences.setCallSpeechMode("NOTICE") } }
+                        SpeechChoice("告诉我谁来电", "优先使用联系人姓名；无法识别时说“有来电”", callMode == "SOURCE") { scope.launch { graph.preferences.setCallSpeechMode("SOURCE") } }
+                        val granted = permissionRevision.let { ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED }
+                        if (!granted) OutlinedButton(onClick = { phonePermission.launch(Manifest.permission.READ_PHONE_STATE) }) { Text("授权来电状态") }
+                    }
+                }
+            }
+            item { SectionTitle("短信提醒") }
+            item {
+                InfoCard {
+                    SettingSwitch("提醒短信", "只处理系统默认短信应用的新通知", sms) {
                         scope.launch { graph.preferences.setAnnouncementSources(calls, it, riderApps) }
                     }
-                    if (mode == "RIDER") {
-                    OutlinedButton(onClick = { sourceDialog = true }, modifier = Modifier.fillMaxWidth()) { Text("选择接单应用（已选 ${selectedPackages.size} 个）") }
-                    SettingSwitch("骑手应用", "仅外卖骑手端：新订单、指派、取消、超时、变更和重要联系", riderApps) {
-                        scope.launch { graph.preferences.setAnnouncementSources(calls, sms, it) }
+                    if (sms) {
+                        SpeechChoice("简短提醒", "只说“收到短信”", smsMode == "NOTICE") { scope.launch { graph.preferences.setSmsSpeechMode("NOTICE") } }
+                        SpeechChoice("告诉我谁发来的", "例如“小明发来短信”；识别不到则说“未知来源短信”", smsMode == "SOURCE") { scope.launch { graph.preferences.setSmsSpeechMode("SOURCE") } }
+                        SpeechChoice("通讯录联系人的内容", "已匹配联系人时读简短正文；其他短信只报来源", smsMode == "CONTACT_BODY") {
+                            scope.launch { graph.preferences.setSmsSpeechMode("CONTACT_BODY") }
+                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) contactsPermission.launch(Manifest.permission.READ_CONTACTS)
+                        }
+                        val granted = permissionRevision.let { ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED }
+                        if (!granted) {
+                            Text("通讯录未授权：不会朗读短信正文")
+                            OutlinedButton(onClick = { contactsPermission.launch(Manifest.permission.READ_CONTACTS) }) { Text("授权通讯录匹配") }
+                        }
+                        Text("验证码数字和系统隐藏的正文不会朗读")
+                        SettingSwitch("接收验证码提醒", "关闭后验证码通知静音；开启时仍按上述方式报来源", hideCodes) {
+                            scope.launch { graph.preferences.setHideVerificationCodes(it) }
+                        }
                     }
-                    SettingSwitch("播报骑手收益", "默认开启；只播预计收入、配送费、跑腿费、奖励和补贴，其他金额隐藏", riderIncome) {
-                        scope.launch { graph.preferences.setAnnounceRiderIncome(it) }
-                    }
-                    }
-                    SettingSwitch("验证码仅提示", "开启时只提示收到验证码；关闭后验证码通知静音", hideCodes) {
-                        scope.launch { graph.preferences.setHideVerificationCodes(it) }
+                }
+            }
+            if (mode == "RIDER") {
+                item { SectionTitle("接单应用") }
+                item {
+                    InfoCard {
+                        OutlinedButton(onClick = { sourceDialog = true }, modifier = Modifier.fillMaxWidth()) { Text("选择接单应用（已选 ${selectedPackages.size} 个）") }
+                        SettingSwitch("骑手应用", "新订单、指派、取消、超时、变更和重要联系", riderApps) {
+                            scope.launch { graph.preferences.setAnnouncementSources(calls, sms, it) }
+                        }
+                        SettingSwitch("播报骑手收益", "只读预计收入、配送费、奖励和补贴", riderIncome) {
+                            scope.launch { graph.preferences.setAnnounceRiderIncome(it) }
+                        }
                     }
                 }
             }
@@ -192,7 +244,8 @@ fun AnnouncementSettingsScreen(graph: AppGraph, onBack: () -> Unit) {
             }
 
             }
-            item { SectionTitle("内容程度") }
+            if (mode == "RIDER") {
+            item { SectionTitle("接单消息内容") }
             item {
                 InfoCard {
                     val current = runCatching { ContentDetail.valueOf(detailName) }.getOrDefault(ContentDetail.STANDARD)
@@ -208,6 +261,7 @@ fun AnnouncementSettingsScreen(graph: AppGraph, onBack: () -> Unit) {
                 }
             }
 
+            }
             item { SectionTitle("离线 TTS 音色", "仅显示系统引擎中可确认不依赖网络的中文 Voice") }
             item {
                 InfoCard {
@@ -216,7 +270,7 @@ fun AnnouncementSettingsScreen(graph: AppGraph, onBack: () -> Unit) {
                         when {
                             info == null -> "正在检查系统 TTS…"
                             info.eligibleChineseVoices > 0 -> "系统离线音色：${info.eligibleChineseVoices} 个（优先使用）"
-                            info.embeddedFallbackAvailable -> "无合格系统音色，将使用应用内 ARM64 离线音色"
+                            info.embeddedFallbackAvailable -> "无合格系统音色，将使用应用内离线音色"
                             !info.trustedSystemEngine -> "当前 TTS 不是系统引擎，动态通知不会交给它"
                             else -> "未找到可用的离线中文音色"
                         },
@@ -273,7 +327,8 @@ fun AnnouncementSettingsScreen(graph: AppGraph, onBack: () -> Unit) {
             }
             item {
                 SectionTitle("最近处理")
-                Text(recent?.let { "${it.decision} · ${it.reasonCode}" } ?: "暂无处理记录")
+                Text(recent?.let { if (it.announcement != null) "通知已捕获并进入提醒队列" else "通知未进入队列：${it.reasonCode}" } ?: "暂无处理记录")
+                Text(playbackState)
             }
             item { Spacer(Modifier.height(28.dp)) }
         }
@@ -330,4 +385,14 @@ private fun ContentDetail.label(): String = when (this) {
     ContentDetail.STANDARD -> "标准：约5–8秒（推荐）"
     ContentDetail.DETAILED -> "较完整：最长约10–12秒"
     ContentDetail.CUSTOM -> "自定义：后续按来源选择字段"
+}
+
+private fun enabledFrom(graph: AppGraph) = graph.announcementSettings.state.value.enabled
+
+@Composable
+private fun SpeechChoice(title: String, description: String, selected: Boolean, onClick: () -> Unit) {
+    Column {
+        FilterChip(selected = selected, onClick = onClick, label = { Text(title) }, modifier = Modifier.fillMaxWidth())
+        Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
 }

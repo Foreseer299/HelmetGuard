@@ -4,6 +4,7 @@ import com.helmet.guard.data.prefs.GuardPreferences
 import com.helmet.guard.domain.AnnouncementProfile
 import com.helmet.guard.domain.AnnouncementSource
 import com.helmet.guard.domain.ContentDetail
+import com.helmet.guard.domain.CommunicationSpeechMode
 import com.helmet.guard.domain.RiderEventCategory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,6 +17,9 @@ import kotlinx.coroutines.launch
 
 data class AnnouncementSettingsSnapshot(
     val enabled: Boolean = false,
+    val phoneTestPlayback: Boolean = false,
+    val smsSpeechMode: CommunicationSpeechMode = CommunicationSpeechMode.SOURCE,
+    val callSpeechMode: CommunicationSpeechMode = CommunicationSpeechMode.SOURCE,
     val mode: String = "PERSONAL",
     val riderPackages: Set<String> = emptySet(),
     val detail: ContentDetail = ContentDetail.STANDARD,
@@ -46,6 +50,8 @@ data class AnnouncementSettingsSnapshot(
         }
         return AnnouncementProfile(
             enabled = enabled,
+            smsSpeechMode = smsSpeechMode,
+            callSpeechMode = callSpeechMode,
             detail = detail,
             maxCharacters = max,
             announceVerificationCodePresence = hideVerificationCodes,
@@ -61,6 +67,9 @@ class AnnouncementSettingsState(preferences: GuardPreferences) {
     val state: StateFlow<AnnouncementSettingsSnapshot> = _state.asStateFlow()
 
     init {
+        scope.launch { preferences.phoneTestPlayback.collectLatest { update { copy(phoneTestPlayback = it) } } }
+        scope.launch { preferences.smsSpeechMode.collectLatest { raw -> update { copy(smsSpeechMode = runCatching { CommunicationSpeechMode.valueOf(raw) }.getOrDefault(CommunicationSpeechMode.SOURCE)) } } }
+        scope.launch { preferences.callSpeechMode.collectLatest { raw -> update { copy(callSpeechMode = runCatching { CommunicationSpeechMode.valueOf(raw) }.getOrDefault(CommunicationSpeechMode.SOURCE)) } } }
         scope.launch { preferences.announcementMode.collectLatest { update { copy(mode = it) } } }
         scope.launch { preferences.riderPackages.collectLatest { update { copy(riderPackages = it) } } }
         scope.launch { preferences.announcementsEnabled.collectLatest { update { copy(enabled = it) } } }

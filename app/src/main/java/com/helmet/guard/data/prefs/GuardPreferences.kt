@@ -28,6 +28,9 @@ class GuardPreferences(private val context: Context) {
         val onboardingComplete = booleanPreferencesKey("onboarding_complete")
         val lastHeartbeat = longPreferencesKey("last_service_heartbeat")
         val announcementsEnabled = booleanPreferencesKey("announcements_enabled")
+        val phoneTestPlayback = booleanPreferencesKey("phone_test_playback")
+        val smsSpeechMode = stringPreferencesKey("sms_speech_mode")
+        val callSpeechMode = stringPreferencesKey("call_speech_mode")
         val announcementMode = stringPreferencesKey("announcement_mode")
         val riderPackages = stringSetPreferencesKey("announcement_rider_packages")
         val announcementDetail = stringPreferencesKey("announcement_detail")
@@ -56,6 +59,9 @@ class GuardPreferences(private val context: Context) {
     val lastServiceHeartbeat: Flow<Long> = context.guardDataStore.data.map { it[Keys.lastHeartbeat] ?: 0L }
     val announcementMode: Flow<String> = context.guardDataStore.data.map { it[Keys.announcementMode] ?: "PERSONAL" }
     val riderPackages: Flow<Set<String>> = context.guardDataStore.data.map { it[Keys.riderPackages] ?: emptySet() }
+    val phoneTestPlayback: Flow<Boolean> = context.guardDataStore.data.map { it[Keys.phoneTestPlayback] ?: false }
+    val smsSpeechMode: Flow<String> = context.guardDataStore.data.map { it[Keys.smsSpeechMode] ?: "SOURCE" }
+    val callSpeechMode: Flow<String> = context.guardDataStore.data.map { it[Keys.callSpeechMode] ?: "SOURCE" }
     val announcementsEnabled: Flow<Boolean> = context.guardDataStore.data.map { it[Keys.announcementsEnabled] ?: false }
     val announcementDetail: Flow<String> = context.guardDataStore.data.map { it[Keys.announcementDetail] ?: "STANDARD" }
     val ttsVoiceName: Flow<String> = context.guardDataStore.data.map { it[Keys.ttsVoiceName] ?: "" }
@@ -85,6 +91,9 @@ class GuardPreferences(private val context: Context) {
         if (enabled) packages.add(packageName) else packages.remove(packageName)
         prefs[Keys.riderPackages] = packages
     }
+    suspend fun setPhoneTestPlayback(value: Boolean) = context.guardDataStore.edit { it[Keys.phoneTestPlayback] = value }
+    suspend fun setSmsSpeechMode(value: String) = context.guardDataStore.edit { it[Keys.smsSpeechMode] = value }
+    suspend fun setCallSpeechMode(value: String) = context.guardDataStore.edit { it[Keys.callSpeechMode] = value }
     suspend fun setAnnouncementsEnabled(value: Boolean) = context.guardDataStore.edit { it[Keys.announcementsEnabled] = value }
     suspend fun setAnnouncementDetail(value: String) = context.guardDataStore.edit { it[Keys.announcementDetail] = value }
     suspend fun setTtsVoiceName(value: String) = context.guardDataStore.edit { it[Keys.ttsVoiceName] = value }

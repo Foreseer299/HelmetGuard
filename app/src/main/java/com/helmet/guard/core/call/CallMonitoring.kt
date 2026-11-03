@@ -71,6 +71,8 @@ class CallSessionCoordinator(private val announcements: AnnouncementRepository,
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val sessions = linkedMapOf<Int, Session>()
+    private var pendingIdentity: NotificationEvent? = null
+    @Synchronized fun clear() { sessions.values.forEach { it.emitJob?.cancel(); announcements.revoke(it.traceId) }; sessions.clear(); pendingIdentity = null }
 
     @Synchronized
     fun onState(subscriptionId: Int, state: Int, elapsedMs: Long) {
@@ -80,6 +82,9 @@ class CallSessionCoordinator(private val announcements: AnnouncementRepository,
                 if (existing != null) return
                 val session = Session(subscriptionId, UUID.randomUUID().toString(), elapsedMs)
                 sessions[subscriptionId] = session
+                if (sessions.size > 1) sessions.values.forEach { it.identity = null }
+                else pendingIdentity?.takeIf { elapsedMs - it.receivedElapsedMs in 0..5000 }?.let { session.identity = extractIdentity(it) }
+                pendingIdentity = null
                 session.emitJob = scope.launch {
                     delay(700)
                     emitIfActive(subscriptionId)
@@ -92,6 +97,7 @@ class CallSessionCoordinator(private val announcements: AnnouncementRepository,
 
     @Synchronized
     fun onDialerNotification(event: NotificationEvent) {
+        if (sessions.isEmpty()) { pendingIdentity = event; return }
         val candidates = sessions.values.filter { event.receivedElapsedMs - it.startedElapsedMs in -1_000L..5_000L }
         if (candidates.size != 1) { candidates.forEach { it.identity = null }; return }
         val session = candidates.single()
@@ -119,12 +125,14 @@ class CallSessionCoordinator(private val announcements: AnnouncementRepository,
                 receivedElapsedMs = now,
                 isGroupSummary = false,
                 isOngoing = false,
-                source = AnnouncementSource.CALL
+                source = AnnouncementSource.CALL,
+                senderLabel = session.identity
             ), profile()
         )
     }
 
     private fun extractIdentity(event: NotificationEvent): String? {
+        event.senderLabel?.let { return it }
         val candidates = listOf(event.title, event.text)
         return candidates.firstOrNull { text ->
             text.isNotBlank() && text.length <= 40 && !text.contains("正在来电") && !text.equals("来电", true)

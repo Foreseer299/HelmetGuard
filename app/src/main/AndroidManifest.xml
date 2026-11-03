@@ -32,6 +32,8 @@
         <intent><action android:name="android.intent.action.TTS_SERVICE"/></intent>
         <intent><action android:name="android.intent.action.DIAL"/></intent>
     </queries>
+    <uses-permission android:name="android.permission.READ_CONTACTS"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
     <application
         android:name=".HelmetGuardApp"
         android:allowBackup="false"
@@ -46,6 +48,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service android:name=".service.AnnouncementService" android:exported="false" android:foregroundServiceType="mediaPlayback"/>
         <service
             android:name=".service.HelmetGuardService"
             android:exported="false"

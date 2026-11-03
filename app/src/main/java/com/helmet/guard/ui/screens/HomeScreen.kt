@@ -20,7 +20,7 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.ArrowForward
-import androidx.compose.material.icons.outlined.Favorite
+import com.helmet.guard.ui.icons.HealthAndSafety
 import androidx.compose.material.icons.outlined.List
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Warning
@@ -114,7 +114,7 @@ fun HomeScreen(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(52.dp).background(Color.White.copy(alpha = 0.16f), CircleShape), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Outlined.Favorite, null, tint = Color.White, modifier = Modifier.size(29.dp))
+                            Icon(Icons.Outlined.HealthAndSafety, null, tint = Color.White, modifier = Modifier.size(29.dp))
                         }
                         Spacer(Modifier.size(14.dp))
                         Column(Modifier.weight(1f)) {

@@ -7,6 +7,7 @@ import com.helmet.guard.domain.AnnouncementPriority
 import com.helmet.guard.domain.AnnouncementProfile
 import com.helmet.guard.domain.AnnouncementSource
 import com.helmet.guard.domain.ContentDetail
+import com.helmet.guard.domain.CommunicationSpeechMode
 import com.helmet.guard.domain.NotificationEvent
 import com.helmet.guard.domain.RiderEventCategory
 import java.security.MessageDigest
@@ -50,15 +51,16 @@ object NotificationNormalizer {
             addAll(raw.textLines)
         }.map(::clean).filter { it.isNotBlank() }.distinct()
         val text = bodyCandidates.maxByOrNull { it.length }.orEmpty()
-        if (title.isBlank() && text.isBlank()) return null
-        val source = when (raw.packageName) {
-            in config.smsPackages -> AnnouncementSource.SMS
-            in config.callPackages -> AnnouncementSource.CALL
-            in config.riderPackages -> AnnouncementSource.RIDER_APP
+        val source = when {
+            raw.packageName in config.callPackages && raw.category == "call" -> AnnouncementSource.CALL
+            raw.packageName in config.smsPackages -> AnnouncementSource.SMS
+            raw.packageName in config.callPackages -> AnnouncementSource.CALL
+            raw.packageName in config.riderPackages -> AnnouncementSource.RIDER_APP
             else -> AnnouncementSource.UNKNOWN
         }
+        if (title.isBlank() && text.isBlank() && source !in setOf(AnnouncementSource.SMS, AnnouncementSource.CALL)) return null
         val searchable = "$title $text"
-        val businessKey = orderId.find(searchable)?.groupValues?.getOrNull(1)?.takeIf { it.length >= 5 }
+        val businessKey = if (source == AnnouncementSource.RIDER_APP) orderId.find(searchable)?.groupValues?.getOrNull(1)?.takeIf { it.length >= 5 } else null
         return NotificationEvent(
             traceId = UUID.randomUUID().toString(),
             packageName = raw.packageName,
@@ -73,7 +75,8 @@ object NotificationNormalizer {
             isGroupSummary = raw.isGroupSummary,
             isOngoing = raw.isOngoing,
             source = source,
-            businessKey = businessKey
+            businessKey = businessKey,
+            bodyReadable = text.isNotBlank() && !Regex("内容已隐藏|敏感通知|content hidden|sensitive notification", RegexOption.IGNORE_CASE).containsMatchIn(text)
         )
     }
 
@@ -114,7 +117,7 @@ object AnnouncementPolicy {
         if (event.isOngoing && event.source != AnnouncementSource.CALL) return filtered("ONGOING_NON_CALL")
 
         val combined = listOf(event.title, event.text).filter { it.isNotBlank() }.joinToString("，")
-        if (combined.isBlank()) return filtered("EMPTY")
+        if (combined.isBlank() && event.source !in setOf(AnnouncementSource.SMS, AnnouncementSource.CALL)) return filtered("EMPTY")
 
         // Recognize rider work first. A valid new-order/cancellation/timeout must not disappear just
         // because the body also mentions a coupon or promotion seen by the customer.
@@ -136,14 +139,14 @@ object AnnouncementPolicy {
             RiderEventCategory.IMPORTANT_CONTACT -> AnnouncementPriority.IMPORTANT
             else -> AnnouncementPriority.NORMAL
         }
-        val sensitive = verification.containsMatchIn(combined)
+        val sensitive = verification.containsMatchIn(combined) || Regex("验证码|校验码|动态码|verification code|\\botp\\b", RegexOption.IGNORE_CASE).containsMatchIn(combined)
         if (sensitive && !profile.announceVerificationCodePresence) return filtered("VERIFICATION_CODE_MUTED")
 
         val redacted = redact(combined, event.source, profile, sensitive)
         val speech = buildSpeech(event, category, redacted, profile, sensitive)
         if (speech.isBlank()) return filtered("NO_SAFE_SPEECH")
         val fingerprint = sha256(
-            listOf(event.packageName, event.businessKey.orEmpty(), category.name, speech.lowercase(Locale.ROOT)).joinToString("|")
+            listOf(event.packageName, event.notificationKey, event.businessKey.orEmpty(), category.name, sha256(combined), speech.lowercase(Locale.ROOT)).joinToString("|")
         )
         val expiry = when (category) {
             RiderEventCategory.NEW_ORDER -> 25_000L
@@ -217,13 +220,22 @@ object AnnouncementPolicy {
         profile: AnnouncementProfile,
         sensitive: Boolean
     ): String {
-        if (sensitive) return "收到一条验证码通知，具体内容已隐藏"
+        if (category == RiderEventCategory.SMS_MESSAGE) {
+            if (profile.smsSpeechMode == CommunicationSpeechMode.NOTICE) return "收到短信"
+            val sender = event.senderLabel?.takeIf { it.isNotBlank() }
+            val prefix = sender?.let { "${safeSlice(it, 18)}发来短信" } ?: "未知来源短信"
+            if (profile.smsSpeechMode != CommunicationSpeechMode.CONTACT_BODY || !event.senderContactMatched || !event.bodyReadable || sensitive) return prefix
+            val body = redact(event.text, event.source, profile, false)
+            return if (body.isBlank()) prefix else "$prefix：${safeSlice(body, 60)}"
+        }
         if (category == RiderEventCategory.INCOMING_CALL) {
-            val identity = event.title.takeIf {
+            if (profile.callSpeechMode == CommunicationSpeechMode.NOTICE) return "有来电"
+            val identity = event.senderLabel ?: event.title.takeIf {
                 it.isNotBlank() && !it.contains("电话") && !it.contains("来电") && !it.contains(Regex("\\d{5,}"))
             }
             return identity?.let { "${safeSlice(it, 18)}来电" } ?: "有来电"
         }
+        if (sensitive) return "收到一条验证码通知，具体内容已隐藏"
         val prefix = when (category) {
             RiderEventCategory.NEW_ORDER -> "有新订单"
             RiderEventCategory.ASSIGNED -> "订单已指派"
