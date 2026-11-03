@@ -1,12 +1,16 @@
-# HelmetGuard 2.1
+> 当前接手版本：**2.2.0-alpha04**。功能及安装说明见 [alpha04发布说明](docs/RELEASE_2.2_ALPHA04.md)，验证证据见 [测试记录](docs/TEST_RESULTS_ALPHA04.md)，手机/硬件联调见 [联调指南](docs/PHONE_AND_HELMET_TEST_GUIDE.md)。下方保留2.1基线说明。
+
+# HelmetGuard 2.2.0-alpha01
 
 面向 **ESP32-S3 + MPU6050 智能头盔**的 Android 安全应用。从 2.0 起项目采用全新架构，不依赖旧版实现，也不依赖 Google Play 服务；重点适配华为 **HarmonyOS 4** 及国内 Android ROM。
 
 > HelmetGuard 是辅助安全产品，不能替代 120/110、专业救援设备或医疗判断。仅凭单个 IMU 无法在所有环境中保证零误报、零漏报。
 
-2.1 修复事故列表闪退，补齐头盔事件去重、ACK/Cancel、模拟隔离、短信恢复与全局倒计时，并改善界面可读性。变更、验收边界和原实现评价见 [2.1 说明](docs/RELEASE_2.1.md)。
+2.2 alpha01 在 2.1 安全能力上加入通知监听、双卡来电生命周期、本地中文 TTS/PCM/IMA-ADPCM、BLE Audio v1 软件协议、脱敏诊断 ZIP 和播报设置页。详见 [2.2 alpha01 说明](docs/RELEASE_2.2_ALPHA01.md) 与 [音频协议草案](docs/AUDIO_PROTOCOL_V1_DRAFT.md)。
 
-给固件/后端同学：[2.1 联调接口与验收说明](docs/INTEGRATION_2.1.md)，包含 BLE 字段、ACK/Cancel 时序、测试向量和双方验收表。当前项目无独立 HTTP 云端 API。
+> 当前是**软件原型**：Android 与 ESP32 固定向量、构建和原生测试已通过；固件明确报告 `outputReady=false`。MAX98357A/I²S 实物播放、加密吞吐、事故抢占台架测试均未宣称通过。
+
+给固件/后端同学：[2.1 联调接口与验收说明](docs/INTEGRATION_2.1.md)仍适用于安全协议 FFF0–FFF3；动态音频使用独立 8F7A000x 服务。当前项目无独立 HTTP 云端 API。
 
 ## 核心能力
 
@@ -23,6 +27,11 @@
 - 国内 ROM 可靠性中心：华为/荣耀、小米/Redmi、OPPO/一加/realme、vivo/iQOO、三星指引。
 - 配套设备系统关联、`connectedDevice` 前台服务、开机恢复和有硬超时的短时 WakeLock。
 - 正常骑行、减速带、头盔掉落和碰撞特征四类无副作用模拟实验。
+- 通知监听面向骑手端新订单、指派/改派、取消、超时、变更和重要联系；未知来源默认不播报。
+- API 31 `TelephonyCallback` 双卡来电生命周期，拨号器通知只补充身份；号码不可安全确认时只说“有来电”。
+- 手机本地 TTS→PCM16→16 kHz 单声道→独立块 IMA-ADPCM；Android/ESP32 共享固定向量。
+- 累计 `authorizedThrough` 流控：800 ms 启动缓冲为 50 块，重复或迟到状态不会重复增加额度。
+- 设置页提供来源、内容程度、实际可用中文 TTS 音色试听、语速、音调、音量和一键脱敏诊断 ZIP。
 
 ## 安全边界
 
@@ -37,7 +46,7 @@
 - Android Studio Ladybug 或更新版本
 - JDK 17
 - Android SDK 35
-- 最低 Android 8.0（API 26），目标 API 35
+- 最低 Android 12（API 31），目标 API 35
 - Kotlin 2.0 / Jetpack Compose / Room / DataStore
 
 ```bash
@@ -60,8 +69,9 @@ pio run -t upload
 3. 双卡手机必须选择求救 SIM。
 4. 在“可靠性中心”完成对应品牌的自启动、后台活动和电池优化设置。
 5. 在“设备”页先执行系统配套设备关联，再扫描并绑定 HelmetGuard。
-6. 开启骑行守护；只有状态为 `READY` 才代表数据通知真正可用。
-7. 先用模拟实验验证倒计时和算法，再在安全、受控环境标定硬件。
+6. 在“设置 → 通知与头盔语音”打开系统通知使用权，选择来源、内容程度和手机实际可用的 TTS 音色。
+7. 开启骑行守护；只有状态为 `READY` 才代表安全数据通知真正可用。
+8. 先用模拟实验验证倒计时和算法，再在安全、受控环境标定硬件；音频在 `outputReady=false` 阶段不会被当作已播放。
 
 ## 目录
 

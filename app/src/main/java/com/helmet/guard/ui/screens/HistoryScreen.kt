@@ -16,11 +16,11 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.LocationOn
-import androidx.compose.material.icons.outlined.Science
-import androidx.compose.material.icons.outlined.Sms
+import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -96,7 +96,7 @@ fun HistoryScreen(graph: AppGraph) {
 
                 }) {
                     Row {
-                        Icon(Icons.Outlined.Science, null, tint = GuardBlue)
+                        Icon(Icons.Outlined.Build, null, tint = GuardBlue)
                         Spacer(Modifier.padding(5.dp))
                         Column(Modifier.weight(1f)) {
                             Text(session.label.displayName, fontWeight = FontWeight.Bold)
@@ -111,8 +111,8 @@ fun HistoryScreen(graph: AppGraph) {
                             scope.launch {
                                 exportSession(context, graph, session.id)
                             }
-                        }, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.Download, null); Text(" 导出 CSV") }
-                        IconButton(onClick = { scope.launch { graph.recorder.delete(session.id) } }) { Icon(Icons.Outlined.DeleteOutline, null, tint = GuardRed) }
+                        }, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.ArrowForward, null); Text(" 导出 CSV") }
+                        IconButton(onClick = { scope.launch { graph.recorder.delete(session.id) } }) { Icon(Icons.Outlined.Delete, null, tint = GuardRed) }
                     }
                 }
             }
@@ -121,7 +121,7 @@ fun HistoryScreen(graph: AppGraph) {
             items(accidents, key = { it.eventId }) { accident ->
                 InfoCard(Modifier.clickable { selectedAccidentId = accident.eventId }) {
                     Row {
-                        Icon(Icons.Outlined.Sms, null, tint = stageColor(accident.stage))
+                        Icon(Icons.Outlined.Email, null, tint = stageColor(accident.stage))
                         Spacer(Modifier.padding(5.dp))
                         Column(Modifier.weight(1f)) {
                             Text(if (accident.isSimulation) "模拟事故演练" else "疑似事故事件", fontWeight = FontWeight.Bold)

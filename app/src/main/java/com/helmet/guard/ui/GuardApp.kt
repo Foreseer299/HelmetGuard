@@ -3,11 +3,11 @@ package com.helmet.guard.ui
 import android.content.Intent
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Dataset
-import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.List
+import androidx.compose.material.icons.outlined.DateRange
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.Watch
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -27,6 +27,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.helmet.guard.AppGraph
+import com.helmet.guard.ui.screens.AnnouncementSettingsScreen
 import com.helmet.guard.ui.screens.ContactsScreen
 import com.helmet.guard.ui.screens.DeviceScreen
 import com.helmet.guard.ui.screens.HistoryScreen
@@ -37,9 +38,9 @@ import com.helmet.guard.ui.screens.TelemetryScreen
 private data class Destination(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
 private val destinations = listOf(
     Destination("home", "守护", Icons.Outlined.Home),
-    Destination("device", "设备", Icons.Outlined.Watch),
-    Destination("telemetry", "数据", Icons.Outlined.Dataset),
-    Destination("history", "记录", Icons.Outlined.History),
+    Destination("device", "设备", Icons.Outlined.CheckCircle),
+    Destination("telemetry", "数据", Icons.Outlined.List),
+    Destination("history", "记录", Icons.Outlined.DateRange),
     Destination("settings", "设置", Icons.Outlined.Settings)
 )
 
@@ -90,8 +91,16 @@ fun GuardApp(
             composable("device") { DeviceScreen(graph, requestCorePermissions, startMonitoring, associateCompanion) }
             composable("telemetry") { TelemetryScreen(graph, startMonitoring, runServiceAction) }
             composable("history") { HistoryScreen(graph) }
-            composable("settings") { SettingsScreen(graph, requestCorePermissions, { navController.navigate("contacts") }) }
+            composable("settings") {
+                SettingsScreen(
+                    graph,
+                    requestCorePermissions,
+                    { navController.navigate("contacts") },
+                    { navController.navigate("announcements") }
+                )
+            }
             composable("contacts") { ContactsScreen(graph) { navController.popBackStack() } }
+            composable("announcements") { AnnouncementSettingsScreen(graph) { navController.popBackStack() } }
         }
     }
 }

@@ -1,0 +1,333 @@
+package com.helmet.guard.ui.screens
+
+import android.content.Intent
+import android.provider.Settings
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.FileProvider
+import com.helmet.guard.AppGraph
+import com.helmet.guard.core.audio.LocalTtsSynthesizer
+import com.helmet.guard.core.audio.OfflineTtsEngineInfo
+import com.helmet.guard.domain.ContentDetail
+import com.helmet.guard.domain.RiderEventCategory
+import com.helmet.guard.ui.components.InfoCard
+import com.helmet.guard.ui.components.SectionTitle
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import android.content.pm.ApplicationInfo
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AnnouncementSettingsScreen(graph: AppGraph, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val mode by graph.preferences.announcementMode.collectAsState(initial = "PERSONAL")
+    val selectedPackages by graph.preferences.riderPackages.collectAsState(initial = emptySet())
+    var sourceDialog by remember { mutableStateOf(false) }
+    var installedSources by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    val recent by graph.announcements.lastEvaluation.collectAsState()
+    val enabled by graph.preferences.announcementsEnabled.collectAsState(initial = false)
+    val detailName by graph.preferences.announcementDetail.collectAsState(initial = ContentDetail.STANDARD.name)
+    val selectedVoice by graph.preferences.ttsVoiceName.collectAsState(initial = "")
+    val rate by graph.preferences.ttsSpeechRate.collectAsState(initial = 1f)
+    val pitch by graph.preferences.ttsPitch.collectAsState(initial = 1f)
+    val volume by graph.preferences.helmetVolume.collectAsState(initial = 60)
+    val calls by graph.preferences.announceCalls.collectAsState(initial = true)
+    val sms by graph.preferences.announceSms.collectAsState(initial = true)
+    val riderApps by graph.preferences.announceRiderApps.collectAsState(initial = true)
+    val riderIncome by graph.preferences.announceRiderIncome.collectAsState(initial = true)
+    val hideCodes by graph.preferences.hideVerificationCodes.collectAsState(initial = true)
+    val mutedEvents by graph.preferences.mutedAnnouncementEvents.collectAsState(initial = emptySet())
+    val tts = remember { LocalTtsSynthesizer(context) }
+    var voices by remember { mutableStateOf<List<android.speech.tts.Voice>>(emptyList()) }
+    var engineInfo by remember { mutableStateOf<OfflineTtsEngineInfo?>(null) }
+    var voiceMenu by remember { mutableStateOf(false) }
+
+    LaunchedEffect(tts) {
+        voices = tts.availableChineseVoices()
+        engineInfo = tts.offlineEngineInfo()
+    }
+    DisposableEffect(tts) { onDispose { tts.shutdown() } }
+
+    val listenerConnected by com.helmet.guard.core.notification.HelmetNotificationListener.connected.collectAsState()
+    val notificationAccess = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+
+    LaunchedEffect(sourceDialog) {
+        if (sourceDialog) installedSources = withContext(Dispatchers.IO) {
+            val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            context.packageManager.queryIntentActivities(intent, 0)
+                .filter { it.activityInfo.packageName != context.packageName && it.activityInfo.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM == 0 }
+                .map { it.activityInfo.packageName to it.loadLabel(context.packageManager).toString() }
+                .distinctBy { it.first }.sortedBy { it.second }
+        }
+    }
+    if (sourceDialog) AlertDialog(
+        onDismissRequest = { sourceDialog = false }, title = { Text("选择骑手接单应用") },
+        text = { LazyColumn {
+            if (installedSources.isEmpty()) item { Text("尚未发现已安装的第三方应用") }
+            items(installedSources.size) { index ->
+                val (pkg, label) = installedSources[index]
+                SettingSwitch(label, pkg, pkg in selectedPackages) { value ->
+                    scope.launch { graph.preferences.setRiderPackageEnabled(pkg, value) }
+                }
+            }
+        } }, confirmButton = { TextButton(onClick = { sourceDialog = false }) { Text("完成") } }
+    )
+    Scaffold(topBar = {
+        TopAppBar(
+            title = { Text("骑行播报") },
+            navigationIcon = { IconButton(onBack) { Icon(Icons.Outlined.ArrowBack, "返回") } }
+        )
+    }) { padding ->
+        LazyColumn(
+            Modifier.padding(padding).padding(horizontal = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            item {
+                Spacer(Modifier.height(4.dp))
+                SectionTitle("使用模式")
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FilterChip(mode == "PERSONAL", { scope.launch { graph.preferences.setAnnouncementMode("PERSONAL") } }, label = { Text("普通用户") })
+                    FilterChip(mode == "RIDER", { scope.launch { graph.preferences.setAnnouncementMode("RIDER") } }, label = { Text("骑手") })
+                }
+                Text(if (mode == "RIDER") "短信、来电和选定接单应用的工作通知" else "仅处理短信和来电")
+            }
+            item { SectionTitle("状态", "通知在手机本地处理，不上传正文") }
+            item {
+                InfoCard {
+                    SettingSwitch("启用骑行播报", "仅在守护开启且头盔连接时进入音频队列", enabled) {
+                        scope.launch { graph.preferences.setAnnouncementsEnabled(it) }
+                    }
+                    Text(if (notificationAccess) "通知使用权：已授权" else "通知使用权：未授权", color = if (notificationAccess) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+                    OutlinedButton(
+                        onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Icon(Icons.Outlined.Notifications, null); Text(" 打开通知使用权") }
+                    Text(if (listenerConnected) "通知监听：运行中" else "通知监听：等待系统连接")
+                    Text("连接状态：${graph.ble.state.collectAsState().value.message}", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+
+            item { SectionTitle("通知来源", "只处理你开启的来源") }
+            item {
+                InfoCard {
+                    SettingSwitch("来电", "接听或挂断后停止待播提醒", calls) {
+                        scope.launch { graph.preferences.setAnnouncementSources(it, sms, riderApps) }
+                    }
+                    SettingSwitch("短信", "验证码和敏感数字默认隐藏", sms) {
+                        scope.launch { graph.preferences.setAnnouncementSources(calls, it, riderApps) }
+                    }
+                    if (mode == "RIDER") {
+                    OutlinedButton(onClick = { sourceDialog = true }, modifier = Modifier.fillMaxWidth()) { Text("选择接单应用（已选 ${selectedPackages.size} 个）") }
+                    SettingSwitch("骑手应用", "仅外卖骑手端：新订单、指派、取消、超时、变更和重要联系", riderApps) {
+                        scope.launch { graph.preferences.setAnnouncementSources(calls, sms, it) }
+                    }
+                    SettingSwitch("播报骑手收益", "默认开启；只播预计收入、配送费、跑腿费、奖励和补贴，其他金额隐藏", riderIncome) {
+                        scope.launch { graph.preferences.setAnnounceRiderIncome(it) }
+                    }
+                    }
+                    SettingSwitch("验证码仅提示", "开启时只提示收到验证码；关闭后验证码通知静音", hideCodes) {
+                        scope.launch { graph.preferences.setHideVerificationCodes(it) }
+                    }
+                }
+            }
+
+            if (mode == "RIDER") {
+            item { SectionTitle("骑手事件", "每类事件可单独静音；不同订单仍按可靠订单键分别处理") }
+            item {
+                InfoCard {
+                    RIDER_EVENT_OPTIONS.forEach { category ->
+                        SettingSwitch(
+                            category.eventLabel(),
+                            category.eventDescription(),
+                            category.name !in mutedEvents
+                        ) { value ->
+                            scope.launch { graph.preferences.setAnnouncementEventEnabled(category.name, value) }
+                        }
+                    }
+                }
+            }
+
+            }
+            item { SectionTitle("内容程度") }
+            item {
+                InfoCard {
+                    val current = runCatching { ContentDetail.valueOf(detailName) }.getOrDefault(ContentDetail.STANDARD)
+                    ContentDetail.entries.filter { it != ContentDetail.CUSTOM }.forEach { option ->
+                        FilterChip(
+                            selected = current == option,
+                            onClick = { scope.launch { graph.preferences.setAnnouncementDetail(option.name) } },
+                            label = { Text(option.label()) },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    Text("较完整模式仍有12秒和敏感信息限制，不会无限朗读。", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+
+            item { SectionTitle("离线 TTS 音色", "仅显示系统引擎中可确认不依赖网络的中文 Voice") }
+            item {
+                InfoCard {
+                    val info = engineInfo
+                    Text(
+                        when {
+                            info == null -> "正在检查系统 TTS…"
+                            info.eligibleChineseVoices > 0 -> "系统离线音色：${info.eligibleChineseVoices} 个（优先使用）"
+                            info.embeddedFallbackAvailable -> "无合格系统音色，将使用应用内 ARM64 离线音色"
+                            !info.trustedSystemEngine -> "当前 TTS 不是系统引擎，动态通知不会交给它"
+                            else -> "未找到可用的离线中文音色"
+                        },
+                        color = if (voices.isNotEmpty() || info?.embeddedFallbackAvailable == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                    )
+                    Text("当前音色", fontWeight = FontWeight.SemiBold)
+                    Button(onClick = { voiceMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Outlined.Person, null)
+                        Text(" ${voices.firstOrNull { it.name == selectedVoice }?.name ?: "自动选择离线音色"}")
+                    }
+                    DropdownMenu(expanded = voiceMenu, onDismissRequest = { voiceMenu = false }) {
+                        DropdownMenuItem(text = { Text("自动选择系统离线音色") }, onClick = {
+                            voiceMenu = false; scope.launch { graph.preferences.setTtsVoiceName("") }
+                        })
+                        voices.forEach { voice ->
+                            DropdownMenuItem(
+                                text = { Text("${voice.name}（系统离线）") },
+                                onClick = { voiceMenu = false; scope.launch { graph.preferences.setTtsVoiceName(voice.name) } }
+                            )
+                        }
+                    }
+                    Text("语速 ${"%.2f".format(rate)}")
+                    Slider(rate, { scope.launch { graph.preferences.setTtsSpeechRate(it) } }, valueRange = .6f..1.5f)
+                    Text("音调 ${"%.2f".format(pitch)}")
+                    Slider(pitch, { scope.launch { graph.preferences.setTtsPitch(it) } }, valueRange = .6f..1.5f)
+                    Text("头盔音量 $volume%")
+                    Slider(volume.toFloat(), { scope.launch { graph.preferences.setHelmetVolume(it.toInt()) } }, valueRange = 0f..100f)
+                    OutlinedButton(
+                        onClick = { scope.launch { tts.speakPreview("您有一条新订单，请注意骑行安全", selectedVoice.ifBlank { null }, rate, pitch) } },
+                        enabled = voices.isNotEmpty() || engineInfo?.embeddedFallbackAvailable == true,
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("在手机上试听离线音色") }
+                }
+            }
+
+            item { SectionTitle("诊断", "导出内容默认不包含通知正文、姓名、电话、地址、密钥或音频") }
+            item {
+                InfoCard {
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                try {
+                                val file = graph.diagnosticExporter.export()
+                                val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+                                context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                                    type = "application/zip"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }, "导出 HelmetGuard 诊断"))
+                                } catch (error: Exception) { graph.runtime.postMessage("诊断导出失败，请检查剩余空间或分享应用") }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Icon(Icons.Outlined.Build, null); Text(" 导出脱敏诊断 ZIP") }
+                }
+            }
+            item {
+                SectionTitle("最近处理")
+                Text(recent?.let { "${it.decision} · ${it.reasonCode}" } ?: "暂无处理记录")
+            }
+            item { Spacer(Modifier.height(28.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun SettingSwitch(title: String, detail: String, checked: Boolean, onChecked: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.SemiBold)
+            Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked, onChecked)
+    }
+}
+
+private val RIDER_EVENT_OPTIONS = listOf(
+    RiderEventCategory.NEW_ORDER,
+    RiderEventCategory.ASSIGNED,
+    RiderEventCategory.REASSIGNED,
+    RiderEventCategory.CANCELLED,
+    RiderEventCategory.PICKUP_TIMEOUT,
+    RiderEventCategory.DELIVERY_TIMEOUT,
+    RiderEventCategory.ORDER_CHANGED,
+    RiderEventCategory.IMPORTANT_CONTACT
+)
+
+private fun RiderEventCategory.eventLabel(): String = when (this) {
+    RiderEventCategory.NEW_ORDER -> "新订单"
+    RiderEventCategory.ASSIGNED -> "指派"
+    RiderEventCategory.REASSIGNED -> "改派"
+    RiderEventCategory.CANCELLED -> "取消"
+    RiderEventCategory.PICKUP_TIMEOUT -> "取餐超时"
+    RiderEventCategory.DELIVERY_TIMEOUT -> "配送超时"
+    RiderEventCategory.ORDER_CHANGED -> "订单变更"
+    RiderEventCategory.IMPORTANT_CONTACT -> "重要联系"
+    else -> name
+}
+
+private fun RiderEventCategory.eventDescription(): String = when (this) {
+    RiderEventCategory.NEW_ORDER -> "新任务、抢单或接单成功"
+    RiderEventCategory.ASSIGNED, RiderEventCategory.REASSIGNED -> "调度分配或重新分配"
+    RiderEventCategory.CANCELLED -> "客户、商家或平台取消"
+    RiderEventCategory.PICKUP_TIMEOUT, RiderEventCategory.DELIVERY_TIMEOUT -> "即将超时或已经超时"
+    RiderEventCategory.ORDER_CHANGED -> "地址、备注等通知发生变更"
+    RiderEventCategory.IMPORTANT_CONTACT -> "顾客、商家、调度或站长联系"
+    else -> ""
+}
+
+private fun ContentDetail.label(): String = when (this) {
+    ContentDetail.HINT_ONLY -> "仅提示：只说事件类型"
+    ContentDetail.BRIEF -> "简洁：约3–5秒"
+    ContentDetail.STANDARD -> "标准：约5–8秒（推荐）"
+    ContentDetail.DETAILED -> "较完整：最长约10–12秒"
+    ContentDetail.CUSTOM -> "自定义：后续按来源选择字段"
+}

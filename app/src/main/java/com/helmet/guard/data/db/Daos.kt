@@ -113,5 +113,11 @@ interface LogDao {
     @Insert suspend fun insert(entity: SystemLogEntity)
     @Query("SELECT * FROM system_logs ORDER BY timestampMs DESC LIMIT :limit")
     fun observeRecent(limit: Int = 300): Flow<List<SystemLogEntity>>
+    @Query("SELECT * FROM system_logs ORDER BY timestampMs ASC LIMIT :limit")
+    suspend fun recentForExport(limit: Int = 3000): List<SystemLogEntity>
+    @Query("DELETE FROM system_logs WHERE timestampMs < :cutoffMs")
+    suspend fun deleteOlderThan(cutoffMs: Long)
+    @Query("DELETE FROM system_logs WHERE id NOT IN (SELECT id FROM system_logs ORDER BY timestampMs DESC LIMIT :keep)")
+    suspend fun trimToNewest(keep: Int = 3000)
     @Query("DELETE FROM system_logs") suspend fun clear()
 }

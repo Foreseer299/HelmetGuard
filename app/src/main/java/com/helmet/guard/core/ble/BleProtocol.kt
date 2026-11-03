@@ -13,7 +13,7 @@ object HelmetProtocol {
     val CCCD_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
     const val DEVICE_PREFIX = "HelmetGuard"
-    const val DESIRED_MTU = 64
+    const val DESIRED_MTU = 247
     const val VERSION: Byte = 0x01
     const val TYPE_TELEMETRY: Byte = 0x01
     const val TYPE_INCIDENT: Byte = 0x02

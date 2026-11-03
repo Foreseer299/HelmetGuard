@@ -12,13 +12,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.BatterySaver
-import androidx.compose.material.icons.outlined.ChevronRight
-import androidx.compose.material.icons.outlined.ContactEmergency
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.PhoneAndroid
-import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material.icons.outlined.Phone
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
@@ -54,7 +53,12 @@ import com.helmet.guard.ui.theme.GuardRed
 import kotlinx.coroutines.launch
 
 @Composable
-fun SettingsScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit) -> Unit, openContacts: () -> Unit) {
+fun SettingsScreen(
+    graph: AppGraph,
+    requestPermissions: (afterResult: () -> Unit) -> Unit,
+    openContacts: () -> Unit,
+    openAnnouncements: () -> Unit
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val contactsFlow = remember(graph) { graph.database.contacts().observeAll() }
@@ -92,12 +96,12 @@ fun SettingsScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit
                         Column { Text(check.title, fontWeight = FontWeight.SemiBold); Text(check.detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
                 }
-                Button(onClick = { requestPermissions {} }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Security, null); Text(" 授予必要权限") }
+                Button(onClick = { requestPermissions {} }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Lock, null); Text(" 授予必要权限") }
                 OutlinedButton(onClick = { context.startActivity(graph.reliability.notificationSettingsIntent()) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Notifications, null); Text(" 检查通知设置") }
                 OutlinedButton(onClick = {
                     runCatching { context.startActivity(graph.reliability.batteryOptimizationIntent()) }
                         .onFailure { context.startActivity(graph.reliability.appDetailsIntent()) }
-                }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.BatterySaver, null); Text(" 允许忽略电池优化") }
+                }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Info, null); Text(" 允许忽略电池优化") }
                 TextButton(onClick = { context.startActivity(graph.reliability.appDetailsIntent()) }) { Text("后台定位请在权限中选择“始终允许”") }
             }
         }
@@ -109,7 +113,7 @@ fun SettingsScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit
                 }
                 Text(guide.caution, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 graph.reliability.launchManufacturerManager()?.let { intent ->
-                    OutlinedButton(onClick = { runCatching { context.startActivity(intent) } }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.PhoneAndroid, null); Text(" 尝试打开系统管家") }
+                    OutlinedButton(onClick = { runCatching { context.startActivity(intent) } }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Phone, null); Text(" 尝试打开系统管家") }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) { Text("我已完成品牌设置", fontWeight = FontWeight.SemiBold); Text("请在完成以上系统设置后开启", style = MaterialTheme.typography.bodyMedium) }
@@ -120,7 +124,7 @@ fun SettingsScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit
         item { SectionTitle("求救资料") }
         item {
             InfoCard {
-                SettingLink(Icons.Outlined.ContactEmergency, "紧急联系人", "${contacts.count { it.enabled }} 位已启用", openContacts)
+                SettingLink(Icons.Outlined.Call, "紧急联系人", "${contacts.count { it.enabled }} 位已启用", openContacts)
                 SettingLink(Icons.Outlined.Info, "骑手资料", "$riderName ${riderPhone.ifBlank { "" }}") { editRider = true }
                 Text("求救 SIM", fontWeight = FontWeight.SemiBold)
                 if (subscriptions.isEmpty()) Text("未能读取 SIM。请授予电话权限并确认手机已插卡。", color = GuardRed)
@@ -130,6 +134,18 @@ fun SettingsScreen(graph: AppGraph, requestPermissions: (afterResult: () -> Unit
                     }
                 }
                 Text("双卡手机必须明确选择。应用将使用所选 SIM 发送，并记录短信提交和送达回执。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        item { SectionTitle("骑行播报") }
+        item {
+            InfoCard {
+                SettingLink(
+                    Icons.Outlined.Notifications,
+                    "通知与头盔语音",
+                    "来源、内容程度、TTS音色、音量与诊断",
+                    openAnnouncements
+                )
+                Text("普通通知不会占用事故优先级；验证码、地址和敏感信息默认隐藏。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         item { SectionTitle("事故策略") }
@@ -174,6 +190,6 @@ private fun SettingLink(icon: androidx.compose.ui.graphics.vector.ImageVector, t
         Icon(icon, null)
         Spacer(Modifier.padding(5.dp))
         Column(Modifier.weight(1f), horizontalAlignment = Alignment.Start) { Text(title, fontWeight = FontWeight.SemiBold); Text(detail, style = MaterialTheme.typography.bodyMedium) }
-        Icon(Icons.Outlined.ChevronRight, null)
+        Icon(Icons.Outlined.KeyboardArrowRight, null)
     }
 }

@@ -39,8 +39,9 @@ TP4056 通常不提供可直接读取的电量百分比。锂电池最高约 4.2
 
 ```bash
 cd firmware
-pio run
-pio run --target upload
+pio test -e native
+pio run -e esp32-s3-devkitc-1
+pio run -e esp32-s3-devkitc-1 --target upload
 pio device monitor
 ```
 
@@ -55,6 +56,16 @@ pio device monitor
 - 事故事件每秒重发直到收到相同 `eventId` ACK；取消命令关闭蜂鸣。
 - 事件号存入 NVS，仅每次事故写一次，避免逐帧损耗 Flash。
 - 看门狗在主循环和校准期间持续喂狗。
+
+## 2.2 动态音频软件原型
+
+固件额外暴露 `8F7A0000-...` 音频服务，包含能力、控制、数据和状态特征。能力明确返回 `outputReady=false`：当前只能在最多 50 块的受限窗口内校验 CRC、解析并解码独立 IMA-ADPCM 块，**不会假装已经从扬声器播放**。
+
+- 音频特征要求加密且完成身份认证的连接；配套设备关联本身不算认证。
+- 首次启动生成每设备唯一六位 passkey、存入 NVS，并暂时通过串口输出用于 alpha 配对。正式版本必须改成实体配对窗口和设备专属二维码/标签。
+- 固定向量和原生测试在 `test/test_audio` 与 `../docs/audio_vectors_v1.json`。
+- 事故触发或 BLE 断开会立即作废当前音频会话；旧会话数据不会恢复。
+- MAX98357A 的 BCLK/LRC/DIN 引脚尚未冻结，I²S/DMA、启动播放、欠载恢复和物理抢占将在硬件接线确认后实现。
 
 ## 检测边界
 

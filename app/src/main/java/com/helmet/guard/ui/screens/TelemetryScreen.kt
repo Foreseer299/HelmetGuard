@@ -16,10 +16,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.BugReport
-import androidx.compose.material.icons.outlined.Circle
+import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.AddCircle
 import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.Stop
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -92,10 +92,11 @@ fun TelemetryScreen(
         }
         item {
             InfoCard {
+                SectionTitle("加速度", "单位：g · 曲线显示合加速度")
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    AxisValue("AX", sample?.ax, "g", GuardBlue)
-                    AxisValue("AY", sample?.ay, "g", GuardCyan)
-                    AxisValue("AZ", sample?.az, "g", Color(0xFF8B5CF6))
+                    AxisValue("X 轴", sample?.ax, "g", GuardBlue)
+                    AxisValue("Y 轴", sample?.ay, "g", GuardCyan)
+                    AxisValue("Z 轴", sample?.az, "g", Color(0xFF8B5CF6))
                     AxisValue("合计", sample?.accelerationG, "g", GuardRed)
                 }
                 MiniLineChart(accHistory, GuardBlue, Modifier.fillMaxWidth().height(130.dp))
@@ -103,10 +104,11 @@ fun TelemetryScreen(
         }
         item {
             InfoCard {
+                SectionTitle("角速度", "单位：°/s · 曲线显示合角速度")
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    AxisValue("GX", sample?.gx, "°/s", GuardBlue)
-                    AxisValue("GY", sample?.gy, "°/s", GuardCyan)
-                    AxisValue("GZ", sample?.gz, "°/s", Color(0xFF8B5CF6))
+                    AxisValue("X 轴", sample?.gx, "°/s", GuardBlue)
+                    AxisValue("Y 轴", sample?.gy, "°/s", GuardCyan)
+                    AxisValue("Z 轴", sample?.gz, "°/s", Color(0xFF8B5CF6))
                     AxisValue("合计", sample?.angularSpeedDps, "°/s", GuardRed)
                 }
                 MiniLineChart(gyroHistory, GuardCyan, Modifier.fillMaxWidth().height(130.dp))
@@ -114,8 +116,11 @@ fun TelemetryScreen(
         }
         item {
             InfoCard {
-                SectionTitle("姿态与检测特征", detector.label)
-                FeatureRow("横滚 / 俯仰 / 航向", "%.1f° / %.1f° / %.1f°".format(sample?.roll ?: 0f, sample?.pitch ?: 0f, sample?.yaw ?: 0f))
+                SectionTitle("倾角与姿态", "单位：°")
+                FeatureRow("横滚角", sample?.roll?.let { "%.1f°".format(it) } ?: "--")
+                FeatureRow("俯仰角", sample?.pitch?.let { "%.1f°".format(it) } ?: "--")
+                FeatureRow("航向角（相对）", sample?.yaw?.let { "%.1f°".format(it) } ?: "--")
+                SectionTitle("事故检测特征", detector.label)
                 FeatureRow("冲击峰值", "%.2f g".format(detector.features.peakAccelerationG))
                 FeatureRow("角速度峰值", "%.0f °/s".format(detector.features.peakAngularSpeedDps))
                 FeatureRow("姿态变化", "%.1f°".format(detector.features.orientationChangeDeg))
@@ -129,10 +134,10 @@ fun TelemetryScreen(
                     onClick = { scope.launch { graph.recorder.stop() } },
                     modifier = Modifier.fillMaxWidth(),
                     colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = GuardRed)
-                ) { Icon(Icons.Outlined.Stop, null); Spacer(Modifier.padding(4.dp)); Text("停止并保存记录") }
+                ) { Icon(Icons.Outlined.Close, null); Spacer(Modifier.padding(4.dp)); Text("停止并保存记录") }
             } else {
                 Button(onClick = { showRecordDialog = true }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Outlined.Circle, null); Spacer(Modifier.padding(4.dp)); Text("开始参数记录")
+                    Icon(Icons.Outlined.AddCircle, null); Spacer(Modifier.padding(4.dp)); Text("开始参数记录")
                 }
             }
         }
@@ -147,7 +152,7 @@ fun TelemetryScreen(
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(if (scenario == MockScenario.CRASH) Icons.Outlined.BugReport else Icons.Outlined.PlayArrow, null)
+                        Icon(if (scenario == MockScenario.CRASH) Icons.Outlined.Build else Icons.Outlined.PlayArrow, null)
                         Spacer(Modifier.padding(4.dp))
                         Text("运行：${scenario.displayName}")
                     }

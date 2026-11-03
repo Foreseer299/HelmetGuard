@@ -27,11 +27,16 @@
     <uses-feature android:name="android.hardware.telephony.messaging" android:required="false" />
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 
+    <queries><intent><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent>
+        <intent><action android:name="android.provider.Telephony.SMS_DELIVER"/></intent>
+        <intent><action android:name="android.intent.action.TTS_SERVICE"/></intent>
+        <intent><action android:name="android.intent.action.DIAL"/></intent>
+    </queries>
     <application
         android:name=".HelmetGuardApp"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
-        android:label="@string/app_name"
+        android:label="${appLabel}"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.HelmetGuard">
@@ -45,6 +50,15 @@
             android:name=".service.HelmetGuardService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice|location" />
+        <service
+            android:name=".core.notification.HelmetNotificationListener"
+            android:label="HelmetGuard 骑行播报"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
         <receiver android:name=".service.BootReceiver" android:exported="false">
             <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
         </receiver>
