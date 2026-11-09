@@ -279,26 +279,30 @@ class IncidentCoordinator(
         val contacts = database.contacts().active().map {
             EmergencyContact(it.id, it.name, it.phone, it.relationship, it.priority, it.enabled)
         }
-        val report = smsPipeline.sendEmergency(
-            eventId = eventId,
-            contacts = contacts,
-            requestedSubscriptionId = preferences.smsSubscriptionId.first(),
-            riderName = preferences.riderName.first(),
-            riderPhone = preferences.riderPhone.first(),
-            location = fix,
-            confidence = candidate.confidence,
-            detectedAtMs = candidate.detectedAtMs,
-            isSimulation = false
-        )
-        if (!report.launched) {
-            val detail = report.errors.joinToString("；").ifBlank { "短信发送未启动" }
-            finish(eventId, EmergencyStage.FAILED, "$detail。请立即手动拨打紧急电话。", fix)
-            return
-        }
+        try {
+            val report = smsPipeline.sendEmergency(
+                eventId = eventId,
+                contacts = contacts,
+                requestedSubscriptionId = preferences.smsSubscriptionId.first(),
+                riderName = preferences.riderName.first(),
+                riderPhone = preferences.riderPhone.first(),
+                location = fix,
+                confidence = candidate.confidence,
+                detectedAtMs = candidate.detectedAtMs,
+                isSimulation = false
+            )
+            if (!report.launched) {
+                val detail = report.errors.joinToString("；").ifBlank { "短信发送未启动" }
+                finish(eventId, EmergencyStage.FAILED, "$detail。请立即手动拨打紧急电话。", fix)
+                return
+            }
 
-        _state.value = _state.value.copy(detail = "已排队 ${report.queuedContacts} 位联系人、${report.queuedParts} 个短信分段，等待运营商回执")
-        notifyState()
-        awaitSmsResults(eventId, fix)
+            _state.value = _state.value.copy(detail = "已排队 ${report.queuedContacts} 位联系人、${report.queuedParts} 个短信分段，等待运营商回执")
+            notifyState()
+            awaitSmsResults(eventId, fix)
+        } finally {
+            smsPipeline.finishEmergencyConfirmation(eventId)
+        }
     }
 
     private suspend fun awaitSmsResults(eventId: Long, fix: LocationFix?) {
@@ -320,7 +324,11 @@ class IncidentCoordinator(
         val detail = when (finalStage) {
             EmergencyStage.SENT -> "全部 $total 个短信分段已由运营商接受；送达状态将在历史记录中继续更新"
             EmergencyStage.PARTIAL_SUCCESS -> "$accepted/$total 个短信分段已提交，部分发送失败；请尝试电话求助"
-            else -> "未收到任何短信提交成功回执，请立即手动拨打紧急电话"
+            else -> {
+                val failure = results.firstOrNull { it.state == SmsPartState.FAILED.name }?.detail
+                val reason = failure ?: "未收到短信提交成功回执"
+                "$reason。请检查系统短信确认，并立即手动拨打紧急电话。"
+            }
         }
         finish(eventId, finalStage, detail, fix)
     }

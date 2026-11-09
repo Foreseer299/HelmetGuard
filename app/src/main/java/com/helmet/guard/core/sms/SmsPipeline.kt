@@ -8,26 +8,33 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.PowerManager
 import android.telephony.PhoneNumberUtils
 import android.telephony.SmsManager
 import android.telephony.SubscriptionManager
 import androidx.room.withTransaction
 import androidx.core.content.ContextCompat
+import com.helmet.guard.appGraph
 import com.helmet.guard.data.db.GuardDatabase
 import com.helmet.guard.data.db.SmsPartEntity
 import com.helmet.guard.domain.EmergencyContact
 import com.helmet.guard.domain.LocationFix
 import com.helmet.guard.domain.SmsPartState
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 const val ACTION_SMS_SENT = "com.helmet.guard.action.SMS_SENT"
 const val ACTION_SMS_DELIVERED = "com.helmet.guard.action.SMS_DELIVERED"
+private const val ACTION_SMS_TEST_SENT = "com.helmet.guard.action.SMS_TEST_SENT"
 private const val EXTRA_EVENT = "event_id"
 private const val EXTRA_CONTACT = "contact_id"
 private const val EXTRA_CONTACT_NAME = "contact_name"
@@ -59,6 +66,77 @@ class SmsPipeline(
                 info.subscriptionId to (info.displayName?.toString()?.ifBlank { "SIM ${info.simSlotIndex + 1}" } ?: "SIM ${info.simSlotIndex + 1}")
             }
         }.getOrDefault(emptyList())
+    }
+
+    private val testReceipts = ConcurrentHashMap<String, CompletableDeferred<Int>>()
+
+    fun isTestRecipient(phone: String): Boolean =
+        phone.filterNot(Char::isWhitespace).matches(Regex("[+]?[0-9]{7,15}"))
+
+    /** Sends one harmless test message over the same SIM and SMS API as emergency dispatch. */
+    suspend fun sendTest(
+        phone: String,
+        requestedSubscriptionId: Int,
+        requireScreenOff: Boolean = false,
+        assistConfirmation: Boolean = false
+    ): String {
+        if (!hasPermission()) {
+            return "未授予发送短信权限，请在应用权限中允许后再试。"
+        }
+        if (!isTestRecipient(phone)) {
+            return "请选择完整的手机号码作为测试收件人。"
+        }
+        val subscriptionId = resolveSubscription(requestedSubscriptionId)
+            ?: return "请检查 SIM 卡，并在设置中选择求救 SIM。"
+        val manager = SmsManager.getSmsManagerForSubscriptionId(subscriptionId)
+        val parts = manager.divideMessage("【HelmetGuard测试】这是一条骑行守护短信测试，无需救援。")
+        if (parts.size != 1) return "无法生成单条测试短信。"
+
+        val token = UUID.randomUUID().toString()
+        val result = CompletableDeferred<Int>()
+        val callback = PendingIntent.getBroadcast(
+            context, 0,
+            Intent(context, SmsStatusReceiver::class.java).apply {
+                action = ACTION_SMS_TEST_SENT
+                data = Uri.parse("helmetguard://sms/test/$token")
+            },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_ONE_SHOT
+        )
+        testReceipts[token] = result
+        val diagnostics = context.appGraph.diagnostics
+        try {
+            val screenOff = context.getSystemService(PowerManager::class.java)?.isInteractive == false
+            if (requireScreenOff && !screenOff) {
+                return "提交时手机仍亮屏，本次未发送。请重新测试并在倒计时结束前锁屏。"
+            }
+            diagnostics.log(token, "sms", "preflight", "requested",
+                metrics = mapOf("screenOff" to screenOff, "assistEnabled" to assistConfirmation))
+            SmsConfirmationService.begin(token, if (assistConfirmation) 1 else 0)
+            manager.sendMultipartTextMessage(
+                phone.filterNot(Char::isWhitespace), null, parts, arrayListOf(callback), null
+            )
+            val code = withTimeoutOrNull(30_000) { result.await() }
+            diagnostics.log(token, "sms", "preflight", code?.toString() ?: "no_receipt")
+            if (code == null) {
+                return "30 秒内未收到提交回执。请检查是否有系统弹窗，并向收件人确认后再试。"
+            }
+            if (code == Activity.RESULT_OK) {
+                return "本次测试已提交运营商，请向收件人确认。若你点过系统“发送”，仍需另测无人操作时能否发出。"
+            }
+            return "测试短信未提交：${smsResultDescription(code, "SENT")}。"
+        } finally {
+            SmsConfirmationService.gate.end(token)
+            testReceipts.remove(token)
+            callback.cancel()
+        }
+    }
+
+    fun finishEmergencyConfirmation(eventId: Long) {
+        SmsConfirmationService.gate.end("incident:$eventId")
+    }
+
+    internal fun completeTest(token: String, resultCode: Int) {
+        testReceipts[token]?.complete(resultCode)
     }
 
     suspend fun sendEmergency(
@@ -95,6 +173,7 @@ class SmsPipeline(
                 database.smsParts().upsert(row(eventId, contact, part, parts.size, "DELIVERED", SmsPartState.QUEUED, 0, "等待送达回执"))
             } }
         }
+        SmsConfirmationService.begin("incident:$eventId", validContacts.size)
         validContacts.sortedBy { it.priority }.forEach { contact ->
             val sent = ArrayList<PendingIntent>(parts.size)
             val delivered = ArrayList<PendingIntent>(parts.size)
@@ -169,6 +248,10 @@ class SmsPipeline(
 /** Manifest receiver: persists callbacks even when Android recreates the app process for PendingIntent. */
 class SmsStatusReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == ACTION_SMS_TEST_SENT) {
+            intent.data?.lastPathSegment?.let { context.appGraph.sms.completeTest(it, resultCode) }
+            return
+        }
         if (intent.action != ACTION_SMS_SENT && intent.action != ACTION_SMS_DELIVERED) return
         val callbackResultCode = resultCode
         val pending = goAsync()
@@ -201,13 +284,15 @@ class SmsStatusReceiver : BroadcastReceiver() {
             }
         }
     }
+}
 
-    private fun smsResultDescription(code: Int, kind: String): String = when (code) {
-        Activity.RESULT_OK -> if (kind == "SENT") "运营商已接受短信" else "对方网络已返回送达回执"
-        SmsManager.RESULT_ERROR_GENERIC_FAILURE -> "通用发送失败"
-        SmsManager.RESULT_ERROR_NO_SERVICE -> "当前无蜂窝网络服务"
-        SmsManager.RESULT_ERROR_NULL_PDU -> "短信数据无效"
-        SmsManager.RESULT_ERROR_RADIO_OFF -> "飞行模式或蜂窝无线电关闭"
-        else -> "发送/送达失败（代码 $code）"
-    }
+private fun smsResultDescription(code: Int, kind: String): String = when (code) {
+    Activity.RESULT_OK -> if (kind == "SENT") "运营商已接受短信" else "对方网络已返回送达回执"
+    SmsManager.RESULT_CANCELLED -> "系统取消了发送"
+    SmsManager.RESULT_ERROR_SHORT_CODE_NOT_ALLOWED, SmsManager.RESULT_ERROR_SHORT_CODE_NEVER_ALLOWED -> "系统未允许发送到此短号码"
+    SmsManager.RESULT_ERROR_GENERIC_FAILURE -> "通用发送失败"
+    SmsManager.RESULT_ERROR_NO_SERVICE -> "当前无蜂窝网络服务"
+    SmsManager.RESULT_ERROR_NULL_PDU -> "短信数据无效"
+    SmsManager.RESULT_ERROR_RADIO_OFF -> "飞行模式或蜂窝无线电关闭"
+    else -> "发送/送达失败（代码 $code）"
 }

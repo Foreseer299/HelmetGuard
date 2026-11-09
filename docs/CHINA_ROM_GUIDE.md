@@ -45,9 +45,9 @@
 - 加入“从不自动休眠的应用”。
 - 应用电池设为“不受限制”。
 
-## 为什么不使用无障碍自动点击
+## 系统发送确认与回执
 
-AccessibilityService 无法证明短信到达运营商，UI 文案和坐标会随品牌/版本变化，还可能误点并绕过安全确认。2.0 使用 `SmsManager` 的具体 subscription ID、每个分段唯一 `sentIntent`/`deliveryIntent`、静态 BroadcastReceiver 和 Room 持久化。应用只把 `RESULT_OK` 的发送回执记为“运营商接受”。
+2.3.3 支持用户主动开启的短信确认辅助，按系统窗口来源和文案识别。支持范围及实测见 [2.3.3 说明](RELEASE_2.3.3.md)。发送仍使用 `SmsManager` 的具体 subscription ID、每个分段唯一 `sentIntent`/`deliveryIntent`、静态 BroadcastReceiver 和 Room 持久化。应用只把 `RESULT_OK` 的发送回执记为“运营商接受”。
 
 ## 可验证与不可验证
 

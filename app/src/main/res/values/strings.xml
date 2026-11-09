@@ -6,4 +6,6 @@
     <string name="channel_emergency_desc">疑似事故倒计时、声音和操作按钮</string>
     <string name="action_cancel_alarm">我安全，取消报警</string>
     <string name="action_send_now">立即求救</string>
+    <string name="sms_confirmation_label">HelmetGuard 求救短信确认辅助</string>
+    <string name="sms_confirmation_description">授权后，仅在 HelmetGuard 提交真实求救短信或你明确启用辅助的测试短信时，识别本应用的系统短信发送确认并点击发送。屏幕内容仅在本机即时判断。</string>
 </resources>

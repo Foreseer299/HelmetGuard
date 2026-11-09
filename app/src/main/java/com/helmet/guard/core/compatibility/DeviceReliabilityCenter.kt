@@ -22,7 +22,11 @@ class DeviceReliabilityCenter(private val context: Context) {
         val batteryIgnored = context.getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(context.packageName) == true
         return listOf(
             ReliabilityCheck("notification", "紧急通知", if (notifications) "通知可正常显示" else "请开启通知，否则无法及时取消误报", notifications),
-            ReliabilityCheck("sms", "短信发送", permission(Manifest.permission.SEND_SMS), has(Manifest.permission.SEND_SMS)),
+            ReliabilityCheck(
+                "sms", "发送短信权限",
+                if (has(Manifest.permission.SEND_SMS)) "已授权。实际发送请在求救短信实测中验证。" else "未授权",
+                has(Manifest.permission.SEND_SMS)
+            ),
             ReliabilityCheck("phone", "SIM 卡状态", permission(Manifest.permission.READ_PHONE_STATE), has(Manifest.permission.READ_PHONE_STATE)),
             ReliabilityCheck("sim", "求救 SIM", if (smsSubscriptionChosen) "已选择" else "双卡手机必须明确选择", smsSubscriptionChosen),
             ReliabilityCheck("bluetooth", "蓝牙", if (bluetooth) "已开启" else "蓝牙已关闭", bluetooth),
