@@ -56,6 +56,16 @@ class Communication23Test {
         saveDiagnostics("sms-phone-playback.zip")
     }
 
+    @Test fun removingSmsNotificationDoesNotRevokeCapturedSpeech() = runBlocking<Unit> {
+        prepare()
+        val now = SystemClock.elapsedRealtime()
+        val id = send("sms", "测试小明", "通知清除后仍应完成提醒", true)
+        val announcement = awaitAnnouncement(now, RiderEventCategory.SMS_MESSAGE)
+        shell("am broadcast --include-stopped-packages -a helmetguard.TEST_NOTIFICATION -p com.helmet.guard.fixture --es kind remove --ei id $id")
+        awaitResult(announcement.traceId, "PHONE_TEST_PLAYED")
+        assertFalse(hasResult(announcement.traceId, "CANCELLED"))
+    }
+
     @Test fun otpAndHiddenSmsGiveUnknownSourceWithoutReadingCode() = runBlocking<Unit> {
         prepare(body=true)
         val otp = sms("sms", "5550100", "验证码839204", false)
@@ -127,13 +137,14 @@ class Communication23Test {
         val now=SystemClock.elapsedRealtime();send(kind,sender,text,known)
         return awaitAnnouncement(now,RiderEventCategory.SMS_MESSAGE)
     }
-    private fun send(kind:String,sender:String,text:String,known:Boolean) {
+    private fun send(kind:String,sender:String,text:String,known:Boolean): Int {
         val id=(SystemClock.elapsedRealtime()%100000).toInt()
         // UiAutomation.executeShellCommand tokenizes arguments without shell quote expansion.
         require(listOf(kind,sender,text).none { value -> value.any(Char::isWhitespace) })
         shell("am broadcast --include-stopped-packages -a helmetguard.TEST_NOTIFICATION -p com.helmet.guard.fixture --es kind $kind --ei id $id" +
             (if(sender.isNotEmpty()) " --es sender $sender" else "") + (if(text.isNotEmpty()) " --es text $text" else "") +
             (if(known) " --es phone +12025550148" else ""))
+        return id
     }
     private suspend fun awaitAnnouncement(now:Long,category:RiderEventCategory):Announcement {
         await { graph.announcements.lastEvaluation.value?.announcement?.let { it.createdElapsedMs>=now && it.category==category }==true }

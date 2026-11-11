@@ -77,6 +77,7 @@ class MainActivity : ComponentActivity() {
                 add(Manifest.permission.BLUETOOTH_SCAN)
                 add(Manifest.permission.BLUETOOTH_CONNECT)
             }
+            add(Manifest.permission.ACCESS_COARSE_LOCATION)
             add(Manifest.permission.ACCESS_FINE_LOCATION)
             add(Manifest.permission.SEND_SMS)
             add(Manifest.permission.READ_PHONE_STATE)
@@ -90,7 +91,10 @@ class MainActivity : ComponentActivity() {
             pendingPermissionActions += afterResult
             if (!permissionRequestRunning) {
                 permissionRequestRunning = true
-                permissionsLauncher.launch(missing.toTypedArray())
+                val request = if (Manifest.permission.ACCESS_FINE_LOCATION in missing) {
+                    (missing + Manifest.permission.ACCESS_COARSE_LOCATION).distinct()
+                } else missing
+                permissionsLauncher.launch(request.toTypedArray())
             }
         }
     }

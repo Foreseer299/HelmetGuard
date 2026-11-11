@@ -26,31 +26,54 @@ class MultiSimCallMonitor(
     private val onState: (subscriptionId: Int, state: Int, elapsedMs: Long) -> Unit
 ) {
     private val callbacks = mutableMapOf<Int, Pair<TelephonyManager, CallCallback>>()
-    private val executor = Executor { command -> command.run() }
+    private val executor = ContextCompat.getMainExecutor(context)
 
+    @Synchronized
     fun start(): Boolean {
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) return false
-        stop()
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
+            stop()
+            return false
+        }
         val subscriptionManager = context.getSystemService(SubscriptionManager::class.java) ?: return false
         val base = context.getSystemService(TelephonyManager::class.java) ?: return false
         val subscriptions = runCatching { subscriptionManager.activeSubscriptionInfoList }.getOrNull().orEmpty()
         val ids = subscriptions.map { it.subscriptionId }.ifEmpty { listOf(SubscriptionManager.DEFAULT_SUBSCRIPTION_ID) }
-        ids.distinct().forEach { id ->
+        val activeIds = ids.toSet()
+        (callbacks.keys - activeIds).forEach { id ->
+            callbacks.remove(id)?.let { (manager, callback) ->
+                runCatching { manager.unregisterTelephonyCallback(callback) }
+                onState(id, TelephonyManager.CALL_STATE_IDLE, SystemClock.elapsedRealtime())
+            }
+        }
+        activeIds.filterNot { it in callbacks }.forEach { id ->
             val manager = if (id == SubscriptionManager.DEFAULT_SUBSCRIPTION_ID) base else base.createForSubscriptionId(id)
             val callback = CallCallback(id)
             runCatching { manager.registerTelephonyCallback(executor, callback) }
                 .onSuccess { callbacks[id] = manager to callback }
         }
-        return callbacks.isNotEmpty()
+        isMonitoring = callbacks.isNotEmpty()
+        return isMonitoring
     }
 
+    @Synchronized
     fun stop() {
         callbacks.values.forEach { (manager, callback) -> runCatching { manager.unregisterTelephonyCallback(callback) } }
         callbacks.clear()
+        isMonitoring = false
+    }
+
+    companion object {
+        @Volatile var isMonitoring: Boolean = false
+            private set
     }
 
     private inner class CallCallback(private val subscriptionId: Int) : TelephonyCallback(), TelephonyCallback.CallStateListener {
-        override fun onCallStateChanged(state: Int) = onState(subscriptionId, state, SystemClock.elapsedRealtime())
+        override fun onCallStateChanged(state: Int) {
+            synchronized(this@MultiSimCallMonitor) {
+                if (callbacks[subscriptionId]?.second !== this) return
+                onState(subscriptionId, state, SystemClock.elapsedRealtime())
+            }
+        }
     }
 }
 
@@ -97,6 +120,7 @@ class CallSessionCoordinator(private val announcements: AnnouncementRepository,
 
     @Synchronized
     fun onDialerNotification(event: NotificationEvent) {
+        if (!com.helmet.guard.core.notification.IncomingCallNotificationPolicy.canDescribeIncomingCall(event.category, event.title, event.text)) return
         if (sessions.isEmpty()) { pendingIdentity = event; return }
         val candidates = sessions.values.filter { event.receivedElapsedMs - it.startedElapsedMs in -1_000L..5_000L }
         if (candidates.size != 1) { candidates.forEach { it.identity = null }; return }

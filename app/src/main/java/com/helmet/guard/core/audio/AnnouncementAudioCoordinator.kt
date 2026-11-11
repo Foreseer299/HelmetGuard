@@ -16,7 +16,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
@@ -41,7 +40,7 @@ class AnnouncementAudioCoordinator(
     private val diagnostics: DiagnosticLogger
 ) {
     private val appContext = context.applicationContext
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val _playbackState = kotlinx.coroutines.flow.MutableStateFlow("尚无播报记录")
     val playbackState: kotlinx.coroutines.flow.StateFlow<String> = _playbackState
     private var tts: LocalTtsSynthesizer? = null
@@ -60,7 +59,8 @@ class AnnouncementAudioCoordinator(
                 launch(start = CoroutineStart.UNDISPATCHED) {
                     settings.state.map { config -> listOf(config.enabled, config.mode, config.calls, config.sms,
                         config.riderApps, config.riderPackages, config.smsSpeechMode, config.callSpeechMode,
-                        config.phoneTestPlayback, config.hideVerificationCodes, config.mutedCategories) }
+                        config.phoneTestPlayback, config.hideVerificationCodes, config.mutedCategories,
+                        config.voiceName, config.speechRate, config.pitch, config.volume) }
                         .distinctUntilChanged().drop(1).collect {
                             activeJob?.cancel()
                             repository.clear()
@@ -125,7 +125,7 @@ class AnnouncementAudioCoordinator(
         val synthesisStarted = SystemClock.elapsedRealtime()
         log(announcement, "TTS_STARTED", "LOCAL_SYNTHESIS")
         val pcm = runCatching {
-            withTimeout(15_000) { withContext(Dispatchers.Main) {
+            withTimeoutOrNull(15_000) {
                 synthesizer.synthesize(
                     announcement.speechText,
                     config.voiceName.ifBlank { null },
@@ -133,26 +133,26 @@ class AnnouncementAudioCoordinator(
                     config.pitch,
                     HelmetAudioProtocol.SAMPLE_RATE_HZ
                 )
-            } }
+            }
         }.getOrElse {
             if (it is CancellationException) throw it
             return log(announcement, "NOT_PLAYED_CONFIRMED", "TTS_FAILED")
-        }
+        } ?: return log(announcement, "NOT_PLAYED_CONFIRMED", "TTS_TIMEOUT")
         currentCoroutineContext().ensureActive()
         if (!repository.permits(announcement.traceId, epoch) || SystemClock.elapsedRealtime() >= announcement.expiresAtElapsedMs) return log(announcement, "NOT_PLAYED_CONFIRMED", "EXPIRED_OR_INCIDENT")
         if (!settings.state.value.enabled || !settings.state.value.allows(announcement.source)) return log(announcement, "NOT_PLAYED_CONFIRMED", "SOURCE_DISABLED")
         log(announcement, "TTS_COMPLETED", "LOCAL_SYNTHESIS", mapOf("durationMs" to SystemClock.elapsedRealtime() - synthesisStarted, "samples" to pcm.size))
-        val limited = pcm.take(HelmetAudioProtocol.SAMPLE_RATE_HZ * 12).toShortArray()
+        val limited = pcm.copyOf(minOf(pcm.size, HelmetAudioProtocol.SAMPLE_RATE_HZ * 12))
         if (!helmetReady()) {
             if (!settings.state.value.phoneTestPlayback) return log(announcement, "NOT_PLAYED_CONFIRMED", "PHONE_TEST_DISABLED")
             log(announcement, "PHONE_TEST_STARTED", "NO_READY_HELMET", mapOf("samples" to limited.size))
-            val played = phonePlayer.play(limited) { settings.state.value.phoneTestPlayback && settings.state.value.enabled && settings.state.value.allows(announcement.source) && repository.permits(announcement.traceId, epoch) }
+            val played = phonePlayer.play(limited, volume = config.volume) { settings.state.value.phoneTestPlayback && settings.state.value.enabled && settings.state.value.allows(announcement.source) && repository.permits(announcement.traceId, epoch) }
             log(announcement, "PHONE_TEST_PLAYED", "PLAYBACK_HEAD_COMPLETED", mapOf("playedSamples" to played))
             return
         }
         val capabilities = ble.audioCapabilities.value ?: return
         val mtu = ble.state.value.mtu ?: return
-        val blocks = ImaAdpcmCodec.encode(limited).map { it.toByteArray() }
+        val blocks = withContext(Dispatchers.Default) { ImaAdpcmCodec.encode(limited).map { it.toByteArray() } }
         if (blocks.isEmpty() || blocks.any { it.size > capabilities.maximumBlockBytes || it.size + HelmetAudioProtocol.DATA_FIXED_OVERHEAD_BYTES > mtu - 3 }) {
             return log(announcement, "NOT_PLAYED_CONFIRMED", "ENCODED_BLOCK_TOO_LARGE")
         }
@@ -190,14 +190,12 @@ class AnnouncementAudioCoordinator(
     ): StreamOutcome = coroutineScope {
         val cursor = ReliableAudioSendCursor(blocks.size)
         val statuses = Channel<AudioStatus>(Channel.UNLIMITED)
-        var outputReady = false
         var retryLimitExceeded = false
         var anyPacketQueued = false
         val statusJob = launch(start = CoroutineStart.UNDISPATCHED) {
             ble.audioStatuses.collect { status ->
                 if (status.sessionId == sessionId) {
                     diagnostics.log(traceId, "ble", "STREAM_STATUS", "STATUS_${status.code}", metrics = mapOf("stream" to sessionId, "clip" to audioId, "expected" to status.expectedSequence, "authorized" to status.authorizedThrough, "received" to status.receivedBlocks, "submitted" to status.submittedBlocks))
-                    outputReady = status.outputReady
                     cursor.updateAuthorization(status.authorizedThrough)
                     if (!cursor.onStatus(status.code, status.expectedSequence)) retryLimitExceeded = true
                     statuses.trySend(status)
@@ -209,7 +207,7 @@ class AnnouncementAudioCoordinator(
             if (!repository.permits(traceId, epoch) || SystemClock.elapsedRealtime() >= expiresAt) return@coroutineScope StreamOutcome.NOT_SENT
             if (!ble.openAudioSession(sessionId)) return@coroutineScope StreamOutcome.NOT_SENT
             val opened = withTimeoutOrNull(2_500) { statuses.receive() }
-            if (opened == null || !outputReady || opened.code == HelmetAudioProtocol.STATUS_CANCELLED) {
+            if (opened == null || !opened.outputReady || opened.code != HelmetAudioProtocol.STATUS_OPEN) {
                 return@coroutineScope StreamOutcome.NOT_SENT
             }
             currentCoroutineContext().ensureActive()
@@ -276,7 +274,7 @@ class AnnouncementAudioCoordinator(
     private fun helmetReady(): Boolean {
         val cap = ble.audioCapabilities.value ?: return false
         return ble.state.value.phase == ConnectionPhase.READY && cap.decoderSupported && cap.outputReady &&
-            cap.codec == HelmetAudioProtocol.CODEC_IMA_ADPCM_BLOCK_V1 && cap.sampleRateHz == HelmetAudioProtocol.SAMPLE_RATE_HZ &&
+            cap.channels == 1 && cap.codec == HelmetAudioProtocol.CODEC_IMA_ADPCM_BLOCK_V1 && cap.sampleRateHz == HelmetAudioProtocol.SAMPLE_RATE_HZ &&
             cap.blockSamples == HelmetAudioProtocol.BLOCK_SAMPLES && cap.startupBlocks >= HelmetAudioProtocol.requiredBlocksForBuffer(800) &&
             (ble.state.value.mtu ?: 23) >= HelmetAudioProtocol.MINIMUM_DYNAMIC_AUDIO_MTU
     }
@@ -296,6 +294,9 @@ class AnnouncementAudioCoordinator(
             result == "PLAYBACK_RESULT_UNKNOWN" -> "头盔播放结果未确认"
             result == "TTS_STARTED" -> "正在生成离线语音"
             result == "CANCELLED" -> "提醒已被中断或撤销"
+            reason == "TTS_TIMEOUT" -> "语音生成超时，请重试或切换音色"
+            reason == "TTS_FAILED" -> "语音生成失败，请检查离线音色"
+            result == "NOT_PLAYED_CONFIRMED" -> "本次提醒未播放（已过期、设置变化或头盔暂不可用）"
             result == "ERROR" -> "提醒失败，请导出诊断日志"
             else -> _playbackState.value
         }

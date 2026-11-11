@@ -83,10 +83,11 @@ fun HomeScreen(
     val selectedSim by graph.preferences.smsSubscriptionId.collectAsState(initial = -1)
     val oemConfirmed by graph.preferences.oemSetupConfirmed.collectAsState(initial = false)
     var confirmSos by remember { mutableStateOf(false) }
-    val subscriptions = graph.sms.availableSubscriptions()
+    val systemRevision = rememberSystemSettingsRevision()
+    val subscriptions = remember(systemRevision) { graph.sms.availableSubscriptions() }
     val checks = graph.reliability.checks(
         contacts.count { it.enabled },
-        selectedSim >= 0 || subscriptions.size == 1,
+        subscriptions.any { it.first == selectedSim } || (selectedSim < 0 && subscriptions.size == 1),
         oemConfirmed
     )
     val failedChecks = checks.count { it.required && !it.passed }

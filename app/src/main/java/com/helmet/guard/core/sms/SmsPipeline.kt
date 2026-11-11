@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.PowerManager
 import android.telephony.PhoneNumberUtils
+import android.telephony.SmsMessage
 import android.telephony.SmsManager
 import android.telephony.SubscriptionManager
 import androidx.room.withTransaction
@@ -182,7 +183,7 @@ class SmsPipeline(
                 delivered += statusIntent(ACTION_SMS_DELIVERED, eventId, contact, part, parts.size, "DELIVERED")
             }
             runCatching {
-                smsManager.sendMultipartTextMessage(contact.phone, null, parts, sent, delivered)
+                smsManager.sendMultipartTextMessage(contact.phone.filterNot(Char::isWhitespace), null, parts, sent, delivered)
             }.onSuccess {
                 queuedParts += parts.size
                 queuedContacts++
@@ -199,7 +200,10 @@ class SmsPipeline(
 
     private fun resolveSubscription(requested: Int): Int? {
         val active = availableSubscriptions()
-        if (requested >= 0 && (active.isEmpty() || active.any { it.first == requested })) return requested
+        if (requested >= 0) {
+            // Never silently move an explicitly selected SIM to a different account after a SIM swap.
+            return requested.takeIf { active.isEmpty() || active.any { info -> info.first == requested } }
+        }
         if (active.size == 1) return active.first().first
         if (active.size > 1) return null // Never guess on a dual-SIM device.
         val defaultId = SubscriptionManager.getDefaultSmsSubscriptionId()
@@ -233,7 +237,10 @@ class SmsPipeline(
             putExtra(EXTRA_KIND, kind)
         }
         val requestCode = (eventId xor contact.id xor (part.toLong() shl 8) xor kind.hashCode().toLong()).toInt()
-        return PendingIntent.getBroadcast(context, requestCode, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        // Delivery callbacks need the modem-provided PDU and format. The receiver is explicit
+        // and non-exported; SENT callbacks remain immutable.
+        val mutability = if (kind == "DELIVERED") PendingIntent.FLAG_MUTABLE else PendingIntent.FLAG_IMMUTABLE
+        return PendingIntent.getBroadcast(context, requestCode, intent, PendingIntent.FLAG_UPDATE_CURRENT or mutability)
     }
 
     private fun row(eventId: Long, contact: EmergencyContact, part: Int, count: Int, kind: String, state: SmsPartState, code: Int, detail: String) =
@@ -257,33 +264,66 @@ class SmsStatusReceiver : BroadcastReceiver() {
         val pending = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                val kind = intent.getStringExtra(EXTRA_KIND) ?: return@launch
+                val kind = if (intent.action == ACTION_SMS_SENT) "SENT" else "DELIVERED"
+                val eventId = intent.getLongExtra(EXTRA_EVENT, -1)
+                val contactId = intent.getLongExtra(EXTRA_CONTACT, -1)
+                val partIndex = intent.getIntExtra(EXTRA_PART, -1)
+                val partCount = intent.getIntExtra(EXTRA_COUNT, 0)
+                if (eventId < 0 || contactId < 0 || partIndex !in 0 until partCount) return@launch
+                val delivery = if (kind == "DELIVERED" && callbackResultCode == Activity.RESULT_OK) {
+                    deliveryReport(intent)
+                } else null
                 val state = when {
                     callbackResultCode == Activity.RESULT_OK && kind == "SENT" -> SmsPartState.SUBMITTED
-                    callbackResultCode == Activity.RESULT_OK && kind == "DELIVERED" -> SmsPartState.DELIVERED
+                    delivery == SmsDeliveryStatus.DELIVERED -> SmsPartState.DELIVERED
+                    delivery == SmsDeliveryStatus.PENDING || delivery == SmsDeliveryStatus.UNKNOWN -> SmsPartState.QUEUED
                     else -> SmsPartState.FAILED
                 }
-                val detail = smsResultDescription(callbackResultCode, kind)
-                GuardDatabase.create(context).smsParts().upsert(
-                    SmsPartEntity(
-                        eventId = intent.getLongExtra(EXTRA_EVENT, -1),
-                        contactId = intent.getLongExtra(EXTRA_CONTACT, -1),
-                        contactName = intent.getStringExtra(EXTRA_CONTACT_NAME).orEmpty(),
-                        phoneMasked = intent.getStringExtra(EXTRA_PHONE_MASKED).orEmpty(),
-                        partIndex = intent.getIntExtra(EXTRA_PART, 0),
-                        partCount = intent.getIntExtra(EXTRA_COUNT, 1),
-                        kind = kind,
-                        state = state.name,
-                        resultCode = callbackResultCode,
-                        detail = detail,
-                        updatedAtMs = System.currentTimeMillis()
+                val detail = when (delivery) {
+                    SmsDeliveryStatus.DELIVERED -> "对方网络已确认送达"
+                    SmsDeliveryStatus.PENDING -> "运营商仍在尝试送达"
+                    SmsDeliveryStatus.FAILED -> "运营商报告未能送达"
+                    SmsDeliveryStatus.UNKNOWN -> "收到状态报告，但尚不能确认送达"
+                    null -> smsResultDescription(callbackResultCode, kind)
+                }
+                val db = GuardDatabase.create(context)
+                db.withTransaction {
+                    val previous = db.smsParts().forEvent(eventId).firstOrNull {
+                        it.contactId == contactId && it.partIndex == partIndex && it.kind == kind
+                    }
+                    if (kind == "DELIVERED" && previous?.state in setOf(SmsPartState.DELIVERED.name, SmsPartState.FAILED.name)) return@withTransaction
+                    db.smsParts().upsert(
+                        SmsPartEntity(
+                            eventId = eventId,
+                            contactId = contactId,
+                            contactName = intent.getStringExtra(EXTRA_CONTACT_NAME).orEmpty(),
+                            phoneMasked = intent.getStringExtra(EXTRA_PHONE_MASKED).orEmpty(),
+                            partIndex = partIndex,
+                            partCount = partCount,
+                            kind = kind,
+                            state = state.name,
+                            resultCode = callbackResultCode,
+                            detail = detail,
+                            updatedAtMs = System.currentTimeMillis()
+                        )
                     )
-                )
+                }
+            } catch (error: Exception) {
+                context.appGraph.diagnostics.log("sms-receipt", "sms", "receipt_persist", error.javaClass.simpleName)
             } finally {
                 pending.finish()
             }
         }
     }
+}
+
+private fun deliveryReport(intent: Intent): SmsDeliveryStatus {
+    val format = intent.getStringExtra("format") ?: return SmsDeliveryStatus.UNKNOWN
+    val pdu = intent.getByteArrayExtra("pdu") ?: return SmsDeliveryStatus.UNKNOWN
+    val message = runCatching { SmsMessage.createFromPdu(pdu, format) }.getOrNull()
+        ?: return SmsDeliveryStatus.UNKNOWN
+    if (!message.isStatusReportMessage) return SmsDeliveryStatus.UNKNOWN
+    return classifySmsDelivery(format, message.status)
 }
 
 private fun smsResultDescription(code: Int, kind: String): String = when (code) {

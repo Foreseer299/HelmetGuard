@@ -42,14 +42,14 @@ class AnnouncementService : Service() {
         scope.launch {
             while (isActive) {
                 com.helmet.guard.core.notification.NotificationListenerRecovery.reconnect(this@AnnouncementService, "SERVICE_CHECK")
+                // Reconcile SIM changes and permissions restored while the service stays alive.
+                refreshCalls()
                 delay(15_000)
             }
         }
         scope.launch {
-            graph.incidents.state.map { it.stage }.distinctUntilChanged().collect { stage ->
-                val blocked = stage in setOf(EmergencyStage.COUNTDOWN, EmergencyStage.LOCATING, EmergencyStage.SENDING)
-                graph.announcements.setSafetyBlocked(blocked)
-                if (blocked) graph.ble.abortAudioForIncident()
+            graph.announcementSettings.state.map { it.enabled && it.calls }.distinctUntilChanged().collect {
+                refreshCalls()
             }
         }
         scope.launch {
@@ -57,19 +57,32 @@ class AnnouncementService : Service() {
         }
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!running.value) return START_NOT_STICKY
         if (running.value) {
-            calls.start()
+            refreshCalls()
             com.helmet.guard.core.notification.NotificationListenerRecovery.reconnect(this, "SERVICE_START")
         }
         return START_STICKY
     }
+    @Synchronized
+    private fun refreshCalls() {
+        if (!running.value) return
+        val config = graph.announcementSettings.state.value
+        if (config.enabled && config.calls) {
+            if (!calls.start()) graph.callSessions.clear()
+        } else {
+            calls.stop()
+            graph.callSessions.clear()
+        }
+    }
+    @Synchronized
     override fun onDestroy() {
         running.value = false
+        scope.cancel()
         calls.stop()
         graph.callSessions.clear()
         graph.announcements.clear()
         graph.announcementAudio.stop()
-        scope.cancel()
         super.onDestroy()
     }
     override fun onBind(intent: Intent?): IBinder? = null

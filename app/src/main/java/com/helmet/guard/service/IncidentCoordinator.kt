@@ -60,6 +60,17 @@ class IncidentCoordinator(
     private val notifications = context.getSystemService(NotificationManager::class.java)
     private val _state = MutableStateFlow(EmergencyUiState())
     val state: StateFlow<EmergencyUiState> = _state.asStateFlow()
+    // Publish the safety gate synchronously with state changes. Separate service collectors
+    // could apply an older idle state after a newer accident and briefly reopen announcements.
+    private var currentState: EmergencyUiState
+        get() = _state.value
+        set(value) {
+            val blocked = value.stage in ACTIVE_STAGES
+            context.appGraph.announcements.setSafetyBlocked(blocked)
+            if (blocked && _state.value.stage !in ACTIVE_STAGES) context.appGraph.ble.abortAudioForIncident()
+            _state.value = value
+        }
+
     private var activeJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
     @Volatile private var sendImmediately = false
@@ -104,7 +115,7 @@ class IncidentCoordinator(
                     val initialStage = EmergencyStage.COUNTDOWN
                     database.accidents().upsert(candidate.toEntity(initialStage, deadline))
                     hardware?.let { acknowledgeHardware(it) }
-                    _state.value = EmergencyUiState(
+                    currentState = EmergencyUiState(
                         stage = initialStage,
                         eventId = candidate.eventId,
                         secondsLeft = countdown,
@@ -124,7 +135,7 @@ class IncidentCoordinator(
                 val detail = "事故流程未能启动，请手动联系紧急联系人；检测器已恢复"
                 attemptedEventId?.let { id ->
                     runCatching { database.accidents().updateStage(id, EmergencyStage.FAILED.name, detail) }
-                    _state.value = EmergencyUiState(stage = EmergencyStage.FAILED, eventId = id, detail = detail)
+                    currentState = EmergencyUiState(stage = EmergencyStage.FAILED, eventId = id, detail = detail)
                     notifyState()
                     releaseWakeLock()
                 }
@@ -156,7 +167,7 @@ class IncidentCoordinator(
                     database.accidents().updateStage(it, EmergencyStage.CANCELLED.name, "用户确认安全并取消")
                     record?.hardwareIdentity()?.let { hardware -> cancelHardware(hardware) }
                 }
-                _state.value = current.copy(stage = EmergencyStage.CANCELLED, secondsLeft = 0, detail = "已确认安全，本次不会发送求救短信", canCancel = false)
+                currentState = current.copy(stage = EmergencyStage.CANCELLED, secondsLeft = 0, detail = "已确认安全，本次不会发送求救短信", canCancel = false)
                 notifyState()
                 releaseWakeLock()
             }
@@ -181,7 +192,7 @@ class IncidentCoordinator(
                 val candidate = pending.toCandidate()
                 val restoredRemaining = (pending.countdownDeadlineMs - System.currentTimeMillis()).coerceIn(0L, 30_000L)
                 val restoredStage = runCatching { EmergencyStage.valueOf(pending.stage) }.getOrDefault(EmergencyStage.FAILED)
-                _state.value = EmergencyUiState(
+                currentState = EmergencyUiState(
                     restoredStage, pending.eventId,
                     (restoredRemaining / 1_000L).toInt(),
                     pending.confidence, "恢复上次未完成的事故处理", pending.stage == EmergencyStage.COUNTDOWN.name,
@@ -211,7 +222,7 @@ class IncidentCoordinator(
         } catch (error: Throwable) {
             val detail = "事故处理发生异常：${error.message ?: error.javaClass.simpleName}。请立即手动联系紧急联系人。"
             runCatching { database.accidents().updateStage(eventId, EmergencyStage.FAILED.name, detail) }
-            _state.value = _state.value.copy(
+            currentState = _state.value.copy(
                 stage = EmergencyStage.FAILED,
                 eventId = eventId,
                 secondsLeft = 0,
@@ -231,19 +242,19 @@ class IncidentCoordinator(
             val leftMs = elapsedDeadline - android.os.SystemClock.elapsedRealtime()
             if (leftMs <= 0 || sendImmediately) break
             val seconds = ((leftMs + 999) / 1_000).toInt()
-            _state.value = _state.value.copy(secondsLeft = seconds)
+            currentState = _state.value.copy(secondsLeft = seconds)
             notifyState()
             delay(250)
         }
         if (candidate.isSimulation) {
             database.accidents().updateStage(candidate.eventId, EmergencyStage.SIMULATED.name, "模拟演练完成，未发送短信")
-            _state.value = _state.value.copy(stage = EmergencyStage.SIMULATED, secondsLeft = 0, detail = "演练完成：定位与短信均未真实执行", canCancel = false)
+            currentState = _state.value.copy(stage = EmergencyStage.SIMULATED, secondsLeft = 0, detail = "演练完成：定位与短信均未真实执行", canCancel = false)
             notifyState()
             releaseWakeLock()
             return
         }
         mutex.withLock {
-            _state.value = _state.value.copy(stage = EmergencyStage.LOCATING, secondsLeft = 0, canCancel = false)
+            currentState = _state.value.copy(stage = EmergencyStage.LOCATING, secondsLeft = 0, canCancel = false)
         }
         dispatch(candidate)
     }
@@ -256,7 +267,7 @@ class IncidentCoordinator(
         }
         val eventId = candidate.eventId
         database.accidents().updateStage(eventId, EmergencyStage.LOCATING.name, "正在获取事故位置")
-        _state.value = _state.value.copy(stage = EmergencyStage.LOCATING, secondsLeft = 0, detail = "正在通过系统定位服务获取位置", canCancel = false)
+        currentState = _state.value.copy(stage = EmergencyStage.LOCATING, secondsLeft = 0, detail = "正在通过系统定位服务获取位置", canCancel = false)
         notifyState()
         promoteServiceForLocation()
         delay(150)
@@ -273,7 +284,7 @@ class IncidentCoordinator(
             eventId, EmergencyStage.SENDING.name, locationDetail,
             fix?.latitude, fix?.longitude, fix?.accuracyMeters, fix?.timeMs, fix?.provider
         )
-        _state.value = _state.value.copy(stage = EmergencyStage.SENDING, detail = "$locationDetail，正在发送求救短信")
+        currentState = _state.value.copy(stage = EmergencyStage.SENDING, detail = "$locationDetail，正在发送求救短信")
         notifyState()
 
         val contacts = database.contacts().active().map {
@@ -297,7 +308,7 @@ class IncidentCoordinator(
                 return
             }
 
-            _state.value = _state.value.copy(detail = "已排队 ${report.queuedContacts} 位联系人、${report.queuedParts} 个短信分段，等待运营商回执")
+            currentState = _state.value.copy(detail = "已排队 ${report.queuedContacts} 位联系人、${report.queuedParts} 个短信分段，等待运营商回执")
             notifyState()
             awaitSmsResults(eventId, fix)
         } finally {
@@ -335,7 +346,7 @@ class IncidentCoordinator(
 
     private suspend fun finish(eventId: Long, stage: EmergencyStage, detail: String, fix: LocationFix?) {
         database.accidents().complete(eventId, stage.name, detail, fix?.latitude, fix?.longitude, fix?.accuracyMeters, fix?.timeMs, fix?.provider)
-        _state.value = _state.value.copy(stage = stage, detail = detail, canCancel = false)
+        currentState = _state.value.copy(stage = stage, detail = detail, canCancel = false)
         notifyState()
         releaseWakeLock()
     }

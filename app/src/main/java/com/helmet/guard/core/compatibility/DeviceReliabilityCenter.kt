@@ -18,7 +18,9 @@ import com.helmet.guard.domain.ReliabilityCheck
 class DeviceReliabilityCenter(private val context: Context) {
     fun checks(activeContacts: Int, smsSubscriptionChosen: Boolean, oemSetupConfirmed: Boolean = false): List<ReliabilityCheck> {
         val notifications = context.getSystemService(NotificationManager::class.java)?.areNotificationsEnabled() == true
-        val bluetooth = context.getSystemService(BluetoothManager::class.java)?.adapter?.isEnabled == true
+        val bluetooth = has(Manifest.permission.BLUETOOTH_CONNECT) && runCatching {
+            context.getSystemService(BluetoothManager::class.java)?.adapter?.isEnabled == true
+        }.getOrDefault(false)
         val batteryIgnored = context.getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(context.packageName) == true
         return listOf(
             ReliabilityCheck("notification", "紧急通知", if (notifications) "通知可正常显示" else "请开启通知，否则无法及时取消误报", notifications),
@@ -30,10 +32,10 @@ class DeviceReliabilityCenter(private val context: Context) {
             ReliabilityCheck("phone", "SIM 卡状态", permission(Manifest.permission.READ_PHONE_STATE), has(Manifest.permission.READ_PHONE_STATE)),
             ReliabilityCheck("sim", "求救 SIM", if (smsSubscriptionChosen) "已选择" else "双卡手机必须明确选择", smsSubscriptionChosen),
             ReliabilityCheck("bluetooth", "蓝牙", if (bluetooth) "已开启" else "蓝牙已关闭", bluetooth),
-            ReliabilityCheck("blePermission", "附近设备", permission(if (Build.VERSION.SDK_INT >= 31) Manifest.permission.BLUETOOTH_CONNECT else Manifest.permission.ACCESS_FINE_LOCATION), has(if (Build.VERSION.SDK_INT >= 31) Manifest.permission.BLUETOOTH_CONNECT else Manifest.permission.ACCESS_FINE_LOCATION)),
+            ReliabilityCheck("blePermission", "附近设备", if (has(Manifest.permission.BLUETOOTH_CONNECT) && has(Manifest.permission.BLUETOOTH_SCAN)) "已授权扫描和连接" else "需要扫描和连接权限", has(Manifest.permission.BLUETOOTH_CONNECT) && has(Manifest.permission.BLUETOOTH_SCAN)),
             ReliabilityCheck("location", "事故定位", permission(Manifest.permission.ACCESS_FINE_LOCATION), has(Manifest.permission.ACCESS_FINE_LOCATION)),
             ReliabilityCheck("backgroundLocation", "后台定位", permission(Manifest.permission.ACCESS_BACKGROUND_LOCATION), Build.VERSION.SDK_INT < 29 || has(Manifest.permission.ACCESS_BACKGROUND_LOCATION)),
-            ReliabilityCheck("battery", "忽略电池优化", if (batteryIgnored) "系统不会主动限制 HelmetGuard" else "建议允许后台持续运行", batteryIgnored),
+            ReliabilityCheck("battery", "忽略电池优化", if (batteryIgnored) "已豁免标准电池优化；仍需检查厂商后台限制" else "建议允许后台持续运行", batteryIgnored),
             ReliabilityCheck("contacts", "紧急联系人", if (activeContacts > 0) "已配置 $activeContacts 人" else "至少添加一位联系人", activeContacts > 0),
             ReliabilityCheck(
                 "oem", "品牌后台保护",
@@ -106,7 +108,9 @@ class DeviceReliabilityCenter(private val context: Context) {
             else -> emptyList()
         }
         return candidates.firstNotNullOfOrNull { (pkg, cls) ->
-            Intent().setComponent(ComponentName(pkg, cls)).takeIf { context.packageManager.resolveActivity(it, 0) != null }
+            Intent().setComponent(ComponentName(pkg, cls)).takeIf { intent ->
+                runCatching { context.packageManager.resolveActivity(intent, 0)?.activityInfo?.exported == true }.getOrDefault(false)
+            }
         }
     }
 

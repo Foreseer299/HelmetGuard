@@ -1,6 +1,7 @@
 package com.helmet.guard.core.sms
 
 import android.accessibilityservice.AccessibilityService
+import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.SystemClock
@@ -17,6 +18,12 @@ class SmsConfirmationService : AccessibilityService() {
     }
 
     override fun onInterrupt() { gate.clear() }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        connection.value = false
+        gate.clear()
+        return super.onUnbind(intent)
+    }
 
     override fun onDestroy() {
         connection.value = false
@@ -38,33 +45,51 @@ class SmsConfirmationService : AccessibilityService() {
         val owner = event.packageName?.toString() ?: return
         if (!isTrustedSystemOwner(owner)) return
         val root = rootInActiveWindow ?: return
-        if (root.windowId != event.windowId || root.packageName?.toString() != owner) return
+        val acquired = mutableListOf(root)
+        try {
+            if (root.windowId != event.windowId || root.packageName?.toString() != owner) return
 
-        val appLabel = applicationInfo.loadLabel(packageManager).toString()
-        val nodes = ArrayDeque<AccessibilityNodeInfo>()
-        nodes.add(root)
-        var hasTitle = false
-        val sendButtons = mutableSetOf<AccessibilityNodeInfo>()
-        val cancelButtons = mutableSetOf<AccessibilityNodeInfo>()
-        var inspected = 0
-        while (nodes.isNotEmpty() && inspected++ < 256) {
-            val node = nodes.removeFirst()
-            if (!node.isVisibleToUser || node.packageName?.toString() != owner) continue
-            val labels = listOfNotNull(node.text?.toString(), node.contentDescription?.toString())
-            hasTitle = hasTitle || labels.any { isSmsConfirmationTitle(it, appLabel) }
-            val send = labels.any { it.trim() == "发送" || it.trim() == "Send" }
-            val cancel = labels.any(::isSmsConfirmationCancel)
-            if (node.isEnabled && node.isClickable && send != cancel) {
-                if (send) sendButtons.add(node) else cancelButtons.add(node)
+            val appLabel = applicationInfo.loadLabel(packageManager).toString()
+            val nodes = ArrayDeque<AccessibilityNodeInfo>()
+            nodes.add(root)
+            var hasTitle = false
+            val sendButtons = mutableSetOf<AccessibilityNodeInfo>()
+            val cancelButtons = mutableSetOf<AccessibilityNodeInfo>()
+            var inspected = 0
+            while (nodes.isNotEmpty() && inspected++ < 256) {
+                val node = nodes.removeFirst()
+                if (!node.isVisibleToUser || node.packageName?.toString() != owner) continue
+                val labels = listOfNotNull(node.text?.toString(), node.contentDescription?.toString())
+                hasTitle = hasTitle || labels.any { isSmsConfirmationTitle(it, appLabel) }
+                val send = labels.any { it.trim() == "发送" || it.trim() == "Send" }
+                val cancel = labels.any(::isSmsConfirmationCancel)
+                if (node.isEnabled && send != cancel) {
+                    // Some ROMs place the label in a non-clickable TextView inside a button.
+                    // Only accept a one-child wrapper: never climb into a whole dialog/list.
+                    val target = if (node.isClickable) node else node.parent?.also(acquired::add)?.takeIf {
+                        it.childCount == 1 && it.isClickable && it.isEnabled && it.isVisibleToUser &&
+                            it.windowId == root.windowId && it.packageName?.toString() == owner
+                    }
+                    if (target != null) {
+                        if (send) sendButtons.add(target) else cancelButtons.add(target)
+                    }
+                }
+                for (index in 0 until node.childCount) node.getChild(index)?.let {
+                    acquired.add(it)
+                    nodes.add(it)
+                }
             }
-            for (index in 0 until node.childCount) node.getChild(index)?.let(nodes::add)
-        }
-        if (nodes.isNotEmpty() || !hasTitle || sendButtons.size != 1 || cancelButtons.size != 1) return
-        val clicked = gate.click(event.windowId, event.eventTime, SystemClock.uptimeMillis()) {
-            sendButtons.single().performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        }
-        if (clicked) {
-            appGraph.diagnostics.log("sms-assist", "sms", "system_confirmation", "clicked", metrics = mapOf("owner" to owner))
+            if (nodes.isNotEmpty() || !hasTitle || sendButtons.size != 1 || cancelButtons.size != 1) return
+            val clicked = gate.click(event.windowId, event.eventTime, SystemClock.uptimeMillis()) {
+                sendButtons.single().performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            }
+            if (clicked) {
+                appGraph.diagnostics.log("sms-assist", "sms", "system_confirmation", "clicked", metrics = mapOf("owner" to owner))
+            }
+        } finally {
+            // Android 12 still pools these objects; repeated window events otherwise leak nodes.
+            @Suppress("DEPRECATION")
+            acquired.forEach { it.recycle() }
         }
     }
 

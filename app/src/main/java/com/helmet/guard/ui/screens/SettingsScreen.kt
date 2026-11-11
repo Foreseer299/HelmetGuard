@@ -73,9 +73,20 @@ fun SettingsScreen(
     val riderName by graph.preferences.riderName.collectAsState(initial = "骑手")
     val riderPhone by graph.preferences.riderPhone.collectAsState(initial = "")
     val oemConfirmed by graph.preferences.oemSetupConfirmed.collectAsState(initial = false)
-    val subscriptions = graph.sms.availableSubscriptions()
+    val systemRevision = rememberSystemSettingsRevision()
+    var permissionRevision by remember { mutableStateOf(0) }
+    val subscriptions = remember(systemRevision, permissionRevision) { graph.sms.availableSubscriptions() }
+    var showChecks by remember { mutableStateOf(false) }
+    var showBackground by remember { mutableStateOf(false) }
+    var showStrategy by remember { mutableStateOf(false) }
+    fun openSystem(intent: Intent) {
+        runCatching { context.startActivity(intent) }.onFailure {
+            runCatching { context.startActivity(graph.reliability.appDetailsIntent()) }
+                .onFailure { graph.runtime.postMessage("无法打开该系统页面，请在手机设置中找到 HelmetGuard。") }
+        }
+    }
     val guide = graph.reliability.guide()
-    val checks = graph.reliability.checks(contacts.count { it.enabled }, selectedSim >= 0 || subscriptions.size == 1, oemConfirmed)
+    val checks = graph.reliability.checks(contacts.count { it.enabled }, subscriptions.any { it.first == selectedSim } || (selectedSim < 0 && subscriptions.size == 1), oemConfirmed)
     var localCountdown by remember(countdown) { mutableFloatStateOf(countdown.toFloat()) }
     var editRider by remember { mutableStateOf(false) }
     val testContact = contacts.filter { it.enabled && graph.sms.isTestRecipient(it.phone) }.minByOrNull { it.priority }
@@ -129,7 +140,7 @@ fun SettingsScreen(
         Modifier.statusBarsPadding().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item { Spacer(Modifier.height(8.dp)); SectionTitle("可靠性中心", "${guide.brand} · ${guide.systemName}") }
+        item { Spacer(Modifier.height(8.dp)); SectionTitle("设置", "${guide.brand} · ${guide.systemName}") }
         item {
             InfoCard {
                 val passed = checks.count { it.passed }
@@ -140,6 +151,8 @@ fun SettingsScreen(
                     }
                     StatusPill(if (passed == checks.size) "设置已完成" else "待完善", if (passed == checks.size) GuardGreen else GuardOrange)
                 }
+                TextButton(onClick = { showChecks = !showChecks }) { Text(if (showChecks) "收起权限详情" else "查看权限与待办") }
+                if (showChecks) {
                 checks.forEach { check ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         StatusPill(if (check.passed) "通过" else "待设置", if (check.passed) GuardGreen else GuardOrange)
@@ -147,24 +160,27 @@ fun SettingsScreen(
                         Column { Text(check.title, fontWeight = FontWeight.SemiBold); Text(check.detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
                 }
-                Button(onClick = { requestPermissions {} }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Lock, null); Text(" 授予必要权限") }
-                OutlinedButton(onClick = { context.startActivity(graph.reliability.notificationSettingsIntent()) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Notifications, null); Text(" 检查通知设置") }
+                Button(onClick = { requestPermissions { permissionRevision++ } }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Lock, null); Text(" 授予必要权限") }
+                OutlinedButton(onClick = { openSystem(graph.reliability.notificationSettingsIntent()) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Notifications, null); Text(" 检查通知设置") }
                 OutlinedButton(onClick = {
-                    runCatching { context.startActivity(graph.reliability.batteryOptimizationIntent()) }
-                        .onFailure { context.startActivity(graph.reliability.appDetailsIntent()) }
+                    openSystem(graph.reliability.batteryOptimizationIntent())
                 }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Info, null); Text(" 允许忽略电池优化") }
-                TextButton(onClick = { context.startActivity(graph.reliability.appDetailsIntent()) }) { Text("后台定位请在权限中选择“始终允许”") }
+                TextButton(onClick = { openSystem(graph.reliability.appDetailsIntent()) }) { Text("后台定位请在权限中选择“始终允许”") }
+                }
             }
         }
         item { SectionTitle("${guide.brand} 后台保护", "按下面的指引设置，避免锁屏后守护中断") }
         item {
             InfoCard {
+                TextButton(onClick = { showBackground = !showBackground }) { Text(if (showBackground) "收起后台运行指引" else "${guide.brand} · 查看后台运行指引") }
+                if (showBackground) {
                 guide.steps.forEachIndexed { index, step ->
                     Row { StatusPill("${index + 1}", GuardOrange); Spacer(Modifier.padding(5.dp)); Text(step, modifier = Modifier.weight(1f)) }
                 }
                 Text(guide.caution, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 graph.reliability.launchManufacturerManager()?.let { intent ->
-                    OutlinedButton(onClick = { runCatching { context.startActivity(intent) } }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Phone, null); Text(" 尝试打开系统管家") }
+                    OutlinedButton(onClick = { openSystem(intent) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Phone, null); Text(" 尝试打开系统管家") }
+                }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) { Text("我已完成品牌设置", fontWeight = FontWeight.SemiBold); Text("请在完成以上系统设置后开启", style = MaterialTheme.typography.bodyMedium) }
@@ -196,7 +212,7 @@ fun SettingsScreen(
                     else -> "先亮屏发送测试短信，按本机提示授权，再用延时测试检查锁屏发送。"
                 })
                 OutlinedButton(
-                    onClick = { context.startActivity(graph.reliability.appDetailsIntent()) },
+                    onClick = { openSystem(graph.reliability.appDetailsIntent()) },
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("打开 HelmetGuard 系统权限") }
                 Button(
@@ -240,9 +256,12 @@ fun SettingsScreen(
         item { SectionTitle("事故策略") }
         item {
             InfoCard {
+                TextButton(onClick = { showStrategy = !showStrategy }) { Text(if (showStrategy) "收起事故策略" else "自动求救倒计时：${countdown} 秒 · 调整") }
+                if (showStrategy) {
                 Text("自动求救倒计时：${localCountdown.toInt()} 秒", fontWeight = FontWeight.SemiBold)
                 Slider(localCountdown, { localCountdown = it }, valueRange = 5f..30f, steps = 24, onValueChangeFinished = { scope.launch { graph.preferences.setCountdownSeconds(localCountdown.toInt()) } })
                 Text("检测器会结合冲击、旋转、姿态变化、自由落体、碰撞前运动和碰撞后静止进行判断。单个 MPU6050 无法保证零误报，正式硬件建议增加佩戴传感器。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
         item {
@@ -265,7 +284,7 @@ fun SettingsScreen(
             confirmButton = {
                 Button(onClick = {
                     showSmsAssistConsent = false
-                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                    openSystem(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                 }) { Text("去系统设置") }
             },
             dismissButton = { TextButton(onClick = { showSmsAssistConsent = false }) { Text("返回") } }

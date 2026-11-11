@@ -34,6 +34,7 @@ class AnnouncementRepository {
 
     @Synchronized
     fun setSafetyBlocked(blocked: Boolean) {
+        if (safetyBlocked == blocked) return
         safetyBlocked = blocked
         if (blocked) { epoch++; scheduler.clear(); _cancellations.tryEmit(null) }
     }
@@ -58,7 +59,11 @@ class AnnouncementRepository {
     fun poll(nowElapsedMs: Long): Announcement? = scheduler.poll(nowElapsedMs)
 
     @Synchronized
-    fun clear() = scheduler.clear()
+    fun clear() {
+        epoch++
+        scheduler.clear()
+        _cancellations.tryEmit(null)
+    }
 }
 
 class AnnouncementScheduler(
@@ -119,7 +124,7 @@ class AnnouncementScheduler(
     }
 
     private fun prune(nowElapsedMs: Long) {
-        queue.removeIf { nowElapsedMs > it.expiresAtElapsedMs }
+        queue.removeIf { nowElapsedMs >= it.expiresAtElapsedMs }
         val iterator = fingerprints.entries.iterator()
         while (iterator.hasNext()) {
             if (nowElapsedMs - iterator.next().value > duplicateWindowMs) iterator.remove()

@@ -13,6 +13,7 @@ class EmbeddedSherpaTtsSynthesizer(context: Context) {
     private val appContext = context.applicationContext
     private val modelRoot = "offline_tts/vits-piper-zh_CN-xiao_ya-medium-int8"
     private val lock = Any()
+    @Volatile private var closed = false
     @Volatile private var engine: Any? = null
     @Volatile private var generateMethod: Method? = null
     @Volatile private var releaseMethod: Method? = null
@@ -25,6 +26,7 @@ class EmbeddedSherpaTtsSynthesizer(context: Context) {
             runCatching { Class.forName("com.k2fsa.sherpa.onnx.OfflineTts") }.isSuccess
 
     fun synthesize(text: String, speechRate: Float, targetRateHz: Int): ShortArray = synchronized(lock) {
+        check(!closed) { "Embedded TTS provider is shut down" }
         check(isBundledAndSupported()) { "Embedded offline TTS is not bundled for this ABI" }
         val active = engine ?: createEngine().also { engine = it }
         val generated = requireNotNull(generateMethod).invoke(active, text, 0, speechRate.coerceIn(.6f, 1.5f))
@@ -37,12 +39,23 @@ class EmbeddedSherpaTtsSynthesizer(context: Context) {
         PcmResampler.monoToRate(pcm, sourceRate, targetRateHz)
     }
 
-    fun shutdown() = synchronized(lock) {
-        val active = engine
-        if (active != null) runCatching { releaseMethod?.invoke(active) }
-        engine = null
-        generateMethod = null
-        releaseMethod = null
+    fun shutdown() {
+        closed = true
+        // Native generation is not interruptible. Never wait for its monitor on Android's UI thread.
+        releaseExecutor.execute {
+            synchronized(lock) {
+                engine?.let { active -> runCatching { releaseMethod?.invoke(active) } }
+                engine = null
+                generateMethod = null
+                releaseMethod = null
+            }
+        }
+    }
+
+    companion object {
+        private val releaseExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { work ->
+            Thread(work, "helmet-tts-release").apply { isDaemon = true }
+        }
     }
 
     private fun createEngine(): Any {

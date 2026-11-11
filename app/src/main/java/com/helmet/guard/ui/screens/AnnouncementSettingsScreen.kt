@@ -80,6 +80,7 @@ fun AnnouncementSettingsScreen(graph: AppGraph, onBack: () -> Unit) {
     val phoneTest by graph.preferences.phoneTestPlayback.collectAsState(initial = false)
     val smsMode by graph.preferences.smsSpeechMode.collectAsState(initial = "SOURCE")
     val callMode by graph.preferences.callSpeechMode.collectAsState(initial = "SOURCE")
+    val systemRevision = rememberSystemSettingsRevision()
     var permissionRevision by remember { mutableStateOf(0) }
     val contactsPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { permissionRevision++ }
     val phonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { permissionRevision++; if (enabledFrom(graph)) AnnouncementService.start(context) }
@@ -99,6 +100,9 @@ fun AnnouncementSettingsScreen(graph: AppGraph, onBack: () -> Unit) {
     var voices by remember { mutableStateOf<List<android.speech.tts.Voice>>(emptyList()) }
     var engineInfo by remember { mutableStateOf<OfflineTtsEngineInfo?>(null) }
     var voiceMenu by remember { mutableStateOf(false) }
+    var previewRunning by remember { mutableStateOf(false) }
+    var previewResult by remember { mutableStateOf<String?>(null) }
+    var showVoiceControls by remember { mutableStateOf(false) }
 
     LaunchedEffect(tts) {
         voices = tts.availableChineseVoices()
@@ -109,7 +113,10 @@ fun AnnouncementSettingsScreen(graph: AppGraph, onBack: () -> Unit) {
     val listenerConnected by com.helmet.guard.core.notification.HelmetNotificationListener.connected.collectAsState()
     val listenerRecovery by com.helmet.guard.core.notification.NotificationListenerRecovery.state.collectAsState()
     val notificationAccess = listenerRecovery.accessGranted
-    LaunchedEffect(Unit) { com.helmet.guard.core.notification.NotificationListenerRecovery.refresh(context) }
+    LaunchedEffect(systemRevision) {
+        permissionRevision++
+        com.helmet.guard.core.notification.NotificationListenerRecovery.refresh(context)
+    }
 
     LaunchedEffect(sourceDialog) {
         if (sourceDialog) installedSources = withContext(Dispatchers.IO) {
@@ -167,7 +174,10 @@ fun AnnouncementSettingsScreen(graph: AppGraph, onBack: () -> Unit) {
                     Text(if (reminderRunning) "提醒服务：运行中" else "提醒服务：未运行，请重新开启通讯提醒")
                     Text(if (notificationAccess) "通知使用权：已授权" else "通知使用权：未授权", color = if (notificationAccess) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
                     OutlinedButton(
-                        onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
+                        onClick = {
+                            runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+                                .onFailure { graph.runtime.postMessage("无法打开通知使用权页面，请在系统设置中搜索“通知使用权”。") }
+                        },
                         modifier = Modifier.fillMaxWidth()
                     ) { Icon(Icons.Outlined.Notifications, null); Text(" 打开通知使用权") }
                     Text(if (listenerConnected) "通知监听：运行中" else "通知监听：等待系统连接（需要关闭通知使用权再重新打开）",
@@ -306,6 +316,8 @@ fun AnnouncementSettingsScreen(graph: AppGraph, onBack: () -> Unit) {
                             )
                         }
                     }
+                    TextButton(onClick = { showVoiceControls = !showVoiceControls }) { Text(if (showVoiceControls) "收起语音调整" else "调整语速与音量") }
+                    if (showVoiceControls) {
                     Text("语速 ${"%.2f".format(rate)}")
                     Slider(rate, { scope.launch { graph.preferences.setTtsSpeechRate(it) } }, valueRange = .6f..1.5f)
                     if (selectedVoice.isNotBlank() && selectedVoice != LocalTtsSynthesizer.EMBEDDED_VOICE) {
@@ -313,13 +325,25 @@ fun AnnouncementSettingsScreen(graph: AppGraph, onBack: () -> Unit) {
                         Slider(pitch, { scope.launch { graph.preferences.setTtsPitch(it) } }, valueRange = .6f..1.5f)
                     }
                     Text("内置小雅保持原声；调整语速不会改变声调")
-                    Text("头盔音量 $volume%")
+                    Text("播报音量 $volume%")
                     Slider(volume.toFloat(), { scope.launch { graph.preferences.setHelmetVolume(it.toInt()) } }, valueRange = 0f..100f)
+                    }
                     OutlinedButton(
-                        onClick = { scope.launch { tts.speakPreview("您有一条新订单，请注意骑行安全", selectedVoice.ifBlank { null }, rate, pitch) } },
-                        enabled = voices.isNotEmpty() || engineInfo?.embeddedFallbackAvailable == true,
+                        onClick = {
+                            scope.launch {
+                                previewRunning = true
+                                previewResult = null
+                                try {
+                                    val text = if (mode == "RIDER") "您有一条新订单，请注意骑行安全" else "您有一条新短信，请注意骑行安全"
+                                    val played = tts.speakPreview(text, selectedVoice.ifBlank { null }, rate, pitch, volume)
+                                    previewResult = if (played) "试听播放完成" else "试听未完成，请检查媒体音量或稍后重试。"
+                                } finally { previewRunning = false }
+                            }
+                        },
+                        enabled = !previewRunning && (voices.isNotEmpty() || engineInfo?.embeddedFallbackAvailable == true),
                         modifier = Modifier.fillMaxWidth()
-                    ) { Text("在手机上试听离线音色") }
+                    ) { Text(if (previewRunning) "正在试听…" else "在手机上试听离线音色") }
+                    previewResult?.let { Text(it) }
                 }
             }
 

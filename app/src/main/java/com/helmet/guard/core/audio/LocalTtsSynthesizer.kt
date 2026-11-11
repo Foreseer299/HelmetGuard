@@ -2,9 +2,6 @@ package com.helmet.guard.core.audio
 
 import android.content.Context
 import android.content.pm.ApplicationInfo
-import android.media.AudioAttributes
-import android.media.AudioFormat
-import android.media.AudioTrack
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
@@ -16,9 +13,12 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 data class OfflineTtsEngineInfo(
     val packageName: String,
@@ -33,6 +33,9 @@ class LocalTtsSynthesizer(context: Context) {
     private val ready = CompletableDeferred<Boolean>()
     private val pending = ConcurrentHashMap<String, CompletableDeferred<Result<File>>>()
     private val embeddedFallback = EmbeddedSherpaTtsSynthesizer(appContext)
+    private val synthesisMutex = Mutex()
+    private val previewPlayer = PhoneTestPlayer(appContext)
+    @Volatile private var closed = false
     private lateinit var tts: TextToSpeech
     @Volatile private var enginePackage: String = ""
     @Volatile private var engineIsSystemApp: Boolean = false
@@ -40,22 +43,29 @@ class LocalTtsSynthesizer(context: Context) {
     init {
         cleanupStaleFiles()
         tts = TextToSpeech(appContext) { status ->
-            val ok = status == TextToSpeech.SUCCESS
-            if (ok) {
-                tts.language = Locale.SIMPLIFIED_CHINESE
-                enginePackage = tts.defaultEngine.orEmpty()
-                engineIsSystemApp = isSystemApplication(enginePackage)
-                tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) = Unit
-                    override fun onDone(utteranceId: String?) {
-                        utteranceId?.let { id -> pending.remove(id)?.complete(Result.success(fileFor(id))) }
-                    }
-                    @Deprecated("Deprecated by Android")
-                    override fun onError(utteranceId: String?) = fail(utteranceId, "TTS synthesis failed")
-                    override fun onError(utteranceId: String?, errorCode: Int) = fail(utteranceId, "TTS error $errorCode")
-                })
+            // Some engines complete initialization immediately; defer until assignment is complete.
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (closed) return@post
+                val ok = status == TextToSpeech.SUCCESS
+                if (ok) {
+                    tts.language = Locale.SIMPLIFIED_CHINESE
+                    enginePackage = tts.defaultEngine.orEmpty()
+                    engineIsSystemApp = isSystemApplication(enginePackage)
+                    tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                        override fun onStart(utteranceId: String?) = Unit
+                        override fun onDone(utteranceId: String?) {
+                            utteranceId?.let { id ->
+                                val waiting = pending.remove(id)
+                                if (waiting == null || !waiting.complete(Result.success(fileFor(id)))) fileFor(id).delete()
+                            }
+                        }
+                        @Deprecated("Deprecated by Android")
+                        override fun onError(utteranceId: String?) = fail(utteranceId, "TTS synthesis failed")
+                        override fun onError(utteranceId: String?, errorCode: Int) = fail(utteranceId, "TTS error $errorCode")
+                    })
+                }
+                if (!ready.isCompleted) ready.complete(ok)
             }
-            if (!ready.isCompleted) ready.complete(ok)
         }
     }
 
@@ -74,19 +84,12 @@ class LocalTtsSynthesizer(context: Context) {
         )
     }
 
-    suspend fun speakPreview(text: String, voiceName: String? = null, speechRate: Float = 1f, pitch: Float = 1f): Boolean {
-        if (preferEmbedded(voiceName)) return embeddedPreview(text, speechRate)
-        val initialized = (withTimeoutOrNull(5_000) { ready.await() } ?: false)
-        val voice = if (initialized) resolveEligibleVoice(voiceName) else null
-        if (voice != null) {
-            tts.voice = voice
-            tts.setSpeechRate(speechRate.coerceIn(.6f, 1.5f))
-            tts.setPitch(pitch.coerceIn(.6f, 1.5f))
-            return tts.speak(text.take(120), TextToSpeech.QUEUE_FLUSH, Bundle(), "preview") == TextToSpeech.SUCCESS
-        }
-        if (!embeddedFallback.isBundledAndSupported()) return false
-        return embeddedPreview(text, speechRate)
-    }
+    suspend fun speakPreview(text: String, voiceName: String? = null, speechRate: Float = 1f, pitch: Float = 1f, volume: Int = 100): Boolean = try {
+        val pcm = synthesize(text.take(120), voiceName, speechRate, pitch)
+        previewPlayer.play(pcm, volume = volume) { !closed }
+        true
+    } catch (cancelled: CancellationException) { throw cancelled }
+      catch (_: Exception) { false }
 
     suspend fun synthesize(
         text: String,
@@ -94,37 +97,30 @@ class LocalTtsSynthesizer(context: Context) {
         speechRate: Float = 1f,
         pitch: Float = 1f,
         targetRateHz: Int = 16_000
-    ): ShortArray {
+    ): ShortArray = synthesisMutex.withLock {
+        check(!closed) { "TTS provider is shut down" }
         require(text.isNotBlank() && text.length <= 120)
-        if (preferEmbedded(voiceName)) return withContext(Dispatchers.Default) {
+        if (preferEmbedded(voiceName)) return@withLock withContext(Dispatchers.Default) {
             embeddedFallback.synthesize(text, speechRate, targetRateHz)
         }
         val systemReady = (withTimeoutOrNull(5_000) { ready.await() } ?: false)
         val systemVoice = if (systemReady) resolveEligibleVoice(voiceName) else null
-        if (systemVoice != null) {
-            try {
-                return synthesizeWithSystem(text, systemVoice, speechRate, pitch, targetRateHz)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                // A local system engine can still fail at synthesis time; use the bundled local provider only.
+        suspend fun embedded(): ShortArray {
+            check(embeddedFallback.isBundledAndSupported()) { "No verified offline Chinese TTS provider" }
+            return withContext(Dispatchers.Default) {
+                embeddedFallback.synthesize(text, speechRate, targetRateHz)
             }
         }
-        check(embeddedFallback.isBundledAndSupported()) { "No verified offline Chinese TTS provider" }
-        return withContext(Dispatchers.Default) {
-            embeddedFallback.synthesize(text, speechRate, targetRateHz)
-        }
+        if (systemVoice != null) {
+            synthesizeWithFallback(
+                primary = { synthesizeWithSystem(text, systemVoice, speechRate, pitch, targetRateHz) },
+                fallback = { embedded() }
+            )
+        } else embedded()
     }
 
     private fun preferEmbedded(voiceName: String?): Boolean =
         embeddedFallback.isBundledAndSupported() && (voiceName.isNullOrBlank() || voiceName == EMBEDDED_VOICE)
-
-    private suspend fun embeddedPreview(text: String, speechRate: Float): Boolean = try {
-        val pcm = withContext(Dispatchers.Default) { embeddedFallback.synthesize(text.take(120), speechRate, 16_000) }
-        playPreviewPcm(pcm, 16_000)
-        true
-    } catch (cancelled: CancellationException) { throw cancelled }
-      catch (_: Exception) { false }
 
     companion object { const val EMBEDDED_VOICE = "embedded:xiaoya" }
 
@@ -142,16 +138,18 @@ class LocalTtsSynthesizer(context: Context) {
         val file = fileFor(id)
         val result = CompletableDeferred<Result<File>>()
         pending[id] = result
-        val started = tts.synthesizeToFile(text, Bundle(), file, id)
-        if (started != TextToSpeech.SUCCESS) {
-            pending.remove(id)
-            throw IllegalStateException("TTS engine rejected synthesis")
-        }
+        var completedNormally = false
         return try {
+            check(tts.synthesizeToFile(text, Bundle(), file, id) == TextToSpeech.SUCCESS) { "TTS engine rejected synthesis" }
             val completed = result.await().getOrThrow()
-            withContext(Dispatchers.IO) { PcmResampler.toMonoAt(WavPcmReader.read(completed.readBytes()), targetRateHz) }
+            currentCoroutineContext().ensureActive()
+            withContext(Dispatchers.IO) {
+                PcmResampler.toMonoAt(WavPcmReader.read(completed.readBytes()), targetRateHz)
+            }.also { completedNormally = true }
         } finally {
             pending.remove(id)
+            result.cancel()
+            if (!completedNormally) runCatching { tts.stop() }
             file.delete()
         }
     }
@@ -163,6 +161,8 @@ class LocalTtsSynthesizer(context: Context) {
     }
 
     fun shutdown() {
+        closed = true
+        ready.complete(false)
         pending.values.forEach { it.cancel() }
         pending.clear()
         embeddedFallback.shutdown()
@@ -192,34 +192,6 @@ class LocalTtsSynthesizer(context: Context) {
         if (packageName.isBlank()) return false
         val info = runCatching { appContext.packageManager.getApplicationInfo(packageName, 0) }.getOrNull() ?: return false
         return info.flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-    }
-
-    private suspend fun playPreviewPcm(pcm: ShortArray, sampleRate: Int) = withContext(Dispatchers.Default) {
-        val track = AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build()
-            )
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setSampleRate(sampleRate)
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                    .build()
-            )
-            .setTransferMode(AudioTrack.MODE_STATIC)
-            .setBufferSizeInBytes(pcm.size * 2)
-            .build()
-        try {
-            check(track.write(pcm, 0, pcm.size, AudioTrack.WRITE_BLOCKING) == pcm.size)
-            track.play()
-            delay((pcm.size * 1_000L / sampleRate) + 100L)
-        } finally {
-            runCatching { track.stop() }
-            track.release()
-        }
     }
 
     private fun fileFor(id: String) = File(appContext.cacheDir, "tts_$id.wav")

@@ -22,14 +22,25 @@ class HelmetNotificationListener : NotificationListenerService() {
     private val processing = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val revisions = ConcurrentHashMap<String, Long>()
     private val sequence = AtomicLong()
-    private val submitted = ConcurrentHashMap<String, String>()
+    private val submittedCalls = NotificationSubmissionTracker()
     override fun onDestroy() {
         connected.value = false
+        synchronized(revisions) {
+            revisions.clear()
+            submittedCalls.clear().forEach { appGraph.announcements.revoke(it) }
+        }
         appGraph.diagnostics.log("listener", "notification_listener", "LIFECYCLE", "DESTROYED")
         processing.cancel(); super.onDestroy()
     }
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
-        sbn?.key?.let { key -> revisions.remove(key); submitted.remove(key)?.let { appGraph.announcements.revoke(it) } }
+        synchronized(revisions) {
+            sbn?.key?.let { key ->
+                // SMS may auto-clear while contact resolution is still running. Its event remains
+                // useful; only a removed call invalidates pending identity work immediately.
+                if (sbn.notification.category == Notification.CATEGORY_CALL) revisions.remove(key)
+                submittedCalls.remove(key)?.let { appGraph.announcements.revoke(it) }
+            }
+        }
     }
     override fun onListenerConnected() {
         super.onListenerConnected(); connected.value = true
@@ -38,6 +49,10 @@ class HelmetNotificationListener : NotificationListenerService() {
     }
     override fun onListenerDisconnected() {
         connected.value = false; super.onListenerDisconnected()
+        synchronized(revisions) {
+            revisions.clear()
+            submittedCalls.clear().forEach { appGraph.announcements.revoke(it) }
+        }
         appGraph.diagnostics.log("listener", "notification_listener", "LIFECYCLE", "DISCONNECTED")
         NotificationListenerRecovery.reconnect(this, "DISCONNECT")
     }
@@ -70,11 +85,13 @@ class HelmetNotificationListener : NotificationListenerService() {
         )
         val event = NotificationNormalizer.normalize(raw, sourceConfig()) ?: return
         val revision = sequence.incrementAndGet()
-        revisions[item.key] = revision
+        synchronized(revisions) { revisions[item.key] = revision }
         processing.launch {
         val resolved = NotificationIdentityResolver(this@HelmetNotificationListener).resolve(event, person?.uri, person?.name?.toString())
         val enriched = if (latestMessage == null && raw.textLines.size > 1) resolved.copy(bodyReadable = false) else resolved
+        synchronized(revisions) {
         if (revisions[item.key] != revision) return@launch
+        if (event.source != com.helmet.guard.domain.AnnouncementSource.CALL) revisions.remove(item.key)
         val settings = appGraph.announcementSettings.state.value
         if (!settings.enabled || !settings.allows(event.source)) {
             appGraph.diagnostics.log(event.traceId, "notification", event.source.name, if (!settings.enabled) "PROFILE_DISABLED" else "SOURCE_NOT_ALLOWED")
@@ -82,20 +99,19 @@ class HelmetNotificationListener : NotificationListenerService() {
         }
         if (event.source == com.helmet.guard.domain.AnnouncementSource.CALL) {
             val phoneAllowed = androidx.core.content.ContextCompat.checkSelfPermission(this@HelmetNotificationListener, android.Manifest.permission.READ_PHONE_STATE) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            if (phoneAllowed) {
+            val telephonyActive = phoneAllowed && com.helmet.guard.core.call.MultiSimCallMonitor.isMonitoring
+            if (telephonyActive && IncomingCallNotificationPolicy.canDescribeIncomingCall(event.category, event.title, event.text)) {
                 appGraph.callSessions.onDialerNotification(enriched)
                 appGraph.diagnostics.log(event.traceId, "notification", "DIALER_IDENTITY", "JOIN_PENDING")
-            } else if (event.category == Notification.CATEGORY_CALL && !Regex("正在通话|通话中|未接来电|已挂断|通话结束|正在拨号|正在呼叫").containsMatchIn(event.text)) {
-                submitted.remove(item.key)?.let { appGraph.announcements.revoke(it) }
+            } else if (!telephonyActive && IncomingCallNotificationPolicy.canDescribeIncomingCall(event.category, event.title, event.text)) {
                 val result = appGraph.announcements.submit(enriched, settings.profile())
-                submitted[item.key] = event.traceId
+                submittedCalls.accept(item.key, result)?.let { appGraph.announcements.revoke(it) }
                 appGraph.diagnostics.log(event.traceId, "notification", "CALL", result.reasonCode)
             } else {
-                submitted.remove(item.key)?.let { appGraph.announcements.revoke(it) }
+                submittedCalls.remove(item.key)?.let { appGraph.announcements.revoke(it) }
             }
         } else {
             val evaluation = appGraph.announcements.submit(enriched, settings.profile())
-            submitted[item.key] = event.traceId
             appGraph.diagnostics.log(
                 event.traceId,
                 "notification",
@@ -103,6 +119,7 @@ class HelmetNotificationListener : NotificationListenerService() {
                 evaluation.reasonCode,
                 metrics = mapOf("category" to evaluation.announcement?.category?.name, "importance" to event.importance, "contentAvailable" to enriched.bodyReadable, "contactMatched" to enriched.senderContactMatched, "hasSender" to (enriched.senderLabel != null))
             )
+        }
         }
         }
     }

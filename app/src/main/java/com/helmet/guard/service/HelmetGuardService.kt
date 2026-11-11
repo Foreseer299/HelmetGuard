@@ -102,10 +102,7 @@ class HelmetGuardService : Service() {
         }
         scope.launch {
             graph.incidents.state.map { it.stage }.distinctUntilChanged().collect { stage ->
-                graph.announcements.setSafetyBlocked(stage in setOf(EmergencyStage.COUNTDOWN, EmergencyStage.LOCATING, EmergencyStage.SENDING))
-                if (stage in setOf(EmergencyStage.COUNTDOWN, EmergencyStage.LOCATING, EmergencyStage.SENDING)) {
-                    graph.ble.abortAudioForIncident()
-                } else {
+                if (stage !in setOf(EmergencyStage.COUNTDOWN, EmergencyStage.LOCATING, EmergencyStage.SENDING)) {
                     graph.detector.reset()
                     simulationDetector.reset()
                 }
