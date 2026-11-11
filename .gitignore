@@ -16,6 +16,9 @@ gen/
 out/
 build/
 app/build/
+app/src/main/assets/offline_tts/
+firmware/.pio/
+artifacts/
 .gradle/
 .kotlin/
 
@@ -59,3 +62,6 @@ Thumbs.db
 # Local environment shortcut & internal docs
 gradle.bat
 final_report.md
+
+# Local verification artifacts
+evidence/

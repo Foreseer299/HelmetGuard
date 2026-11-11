@@ -1,177 +1,212 @@
 package com.helmet.guard.service
 
 import android.Manifest
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
-import android.util.Log
-import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import com.helmet.guard.HelmetGuardApp
-import com.helmet.guard.MainActivity
-import com.helmet.guard.R
-import com.helmet.guard.domain.model.AccidentLifecycleState
-import com.helmet.guard.domain.model.ConnectionStatus
+import com.helmet.guard.appGraph
+import com.helmet.guard.core.ble.HelmetButton
+import com.helmet.guard.core.call.MultiSimCallMonitor
+import com.helmet.guard.core.detector.AdvancedAccidentDetector
+import com.helmet.guard.domain.HardwareIncidentIdentity
+import com.helmet.guard.domain.EmergencyStage
+import com.helmet.guard.core.detector.MockScenario
+import com.helmet.guard.core.detector.MockTelemetryEngine
+import com.helmet.guard.domain.ConnectionPhase
+import com.helmet.guard.domain.DetectionFeatures
+import com.helmet.guard.domain.IncidentCandidate
+import com.helmet.guard.domain.IncidentSource
+import com.helmet.guard.domain.TelemetrySample
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
-/**
- * 前台保活服务
- * 保持蓝牙后台监听、传感器数据流接收与事故告警状态机驻留
- */
 class HelmetGuardService : Service() {
-
-    companion object {
-        const val TAG = "HelmetGuardService"
-        const val CHANNEL_SERVICE_ID = "helmet_guard_service_channel"
-        const val NOTIFICATION_ID = 1001
-
-        fun startService(context: Context) {
-            try {
-                val intent = Intent(context, HelmetGuardService::class.java)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(intent)
-                } else {
-                    context.startService(intent)
-                }
-            } catch (e: Throwable) {
-                Log.w(TAG, "启动前台服务失败: ${e.message}")
-            }
-        }
-
-        fun stopService(context: Context) {
-            try {
-                val intent = Intent(context, HelmetGuardService::class.java)
-                context.stopService(intent)
-            } catch (e: Throwable) {
-                Log.w(TAG, "停止前台服务失败: ${e.message}")
-            }
-        }
-    }
-
-    private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, _ ->
+        graph.runtime.postMessage("后台操作未完成，请检查设备连接和存储空间")
+    })
+    private val graph by lazy { appGraph }
+    private var foregroundReady = false
+    private var simulationJob: Job? = null
+    private val simulationDetector = AdvancedAccidentDetector()
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
-        startAsForeground()
-        observeState()
+        foregroundReady = enterForeground(includeLocation = false)
+        if (!foregroundReady) return
+        scope.launch {
+            graph.ble.telemetry.collect {
+                simulationJob?.cancel()
+                processSample(it, false)
+            }
+        }
+        scope.launch {
+            graph.ble.hardwareIncidents.collect { event ->
+                val now = System.currentTimeMillis()
+                simulationJob?.cancel()
+                val address = event.deviceAddress ?: graph.ble.state.value.device?.address.orEmpty()
+                graph.incidents.trigger(
+                    IncidentCandidate(
+                        now, now, IncidentSource.HELMET_HARDWARE, 0.94f,
+                        DetectionFeatures(
+                            peakAccelerationG = event.peakAccelerationG,
+                            peakAngularSpeedDps = event.peakAngularSpeedDps,
+                            postImpactGyroRms = 0f
+                        ),
+                        hardware = HardwareIncidentIdentity(event.deviceId, event.eventId, address)
+                    ),
+                    event.requestedCountdownSeconds.takeIf { it in 5..30 }
+                )
+
+            }
+        }
+        scope.launch {
+            graph.ble.buttonEvents.collect { button ->
+                when (button) {
+                    HelmetButton.LONG -> graph.incidents.cancel()
+                    HelmetButton.DOUBLE -> graph.incidents.sendNow()
+                    else -> Unit
+                }
+            }
+        }
+        scope.launch {
+            combine(graph.ble.state, graph.recorder.state) { connection, recording -> connection to recording.isRecording }
+                .collect { (connection, recording) ->
+                    val manager = getSystemService(android.app.NotificationManager::class.java)
+                    runCatching {
+                        manager?.notify(GuardNotifications.MONITORING_ID, GuardNotifications.monitoring(this@HelmetGuardService, connection, recording))
+                    }
+                }
+        }
+        scope.launch {
+            graph.ble.state
+                .map { state -> state.device?.takeIf { state.phase == ConnectionPhase.READY }?.let { it.address to it.name } }
+                .distinctUntilChanged()
+                .collect { readyDevice ->
+                    readyDevice?.let { (address, name) -> graph.preferences.bindDevice(address, name) }
+                }
+        }
+        scope.launch {
+            graph.incidents.state.map { it.stage }.distinctUntilChanged().collect { stage ->
+                if (stage !in setOf(EmergencyStage.COUNTDOWN, EmergencyStage.LOCATING, EmergencyStage.SENDING)) {
+                    graph.detector.reset()
+                    simulationDetector.reset()
+                }
+            }
+        }
+        scope.launch {
+            while (isActive) {
+                graph.preferences.heartbeat()
+                delay(60_000)
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!foregroundReady) return START_NOT_STICKY
+        when (intent?.action ?: ACTION_START) {
+            ACTION_START -> scope.launch {
+                graph.preferences.setMonitoringEnabled(true)
+                graph.preferences.boundAddress.first()?.let { graph.ble.reconnect(it) }
+            }
+            ACTION_STOP -> scope.launch {
+                graph.preferences.setMonitoringEnabled(false)
+                simulationJob?.cancel()
+                graph.recorder.stop()
+                graph.ble.disconnect()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+            ACTION_SAFE -> graph.incidents.cancel(intent?.getLongExtra(EXTRA_EVENT_ID, -1))
+            ACTION_SEND_NOW -> graph.incidents.sendNow(intent?.getLongExtra(EXTRA_EVENT_ID, -1))
+            ACTION_MANUAL_SOS -> graph.incidents.triggerManual(intent?.getBooleanExtra(EXTRA_SIMULATION, false) ?: false)
+            ACTION_LOCATION_MODE -> enterForeground(includeLocation = true)
+            ACTION_RUN_SIMULATION -> runSimulation(intent?.getStringExtra(EXTRA_SCENARIO))
+        }
         return START_STICKY
+    }
+
+    override fun onDestroy() {
+        simulationJob?.cancel()
+        scope.cancel()
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            try {
-                val channel = NotificationChannel(
-                    CHANNEL_SERVICE_ID,
-                    getString(R.string.notification_channel_service),
-                    NotificationManager.IMPORTANCE_LOW
-                ).apply {
-                    description = getString(R.string.notification_channel_service_desc)
-                    setShowBadge(false)
-                }
-                val manager = getSystemService(NotificationManager::class.java)
-                manager?.createNotificationChannel(channel)
-            } catch (e: Throwable) {
-                Log.w(TAG, "创建通知渠道失败: ${e.message}")
-            }
+    private suspend fun processSample(sample: TelemetrySample, simulation: Boolean) {
+        val engine = if (simulation) simulationDetector else graph.detector
+        val result = engine.process(sample, simulation)
+        graph.runtime.update(sample, result.snapshot)
+        result.incident?.let {
+            engine.markCountdownActive()
+            graph.incidents.trigger(it.copy(isSimulation = simulation))
         }
-    }
-
-    private fun startAsForeground() {
         try {
-            val notification = buildNotification("Helmet Guard", "正在监测头盔状态")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                val hasLocation = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-                        ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-                val hasBt = ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
-
-                var type = 0
-                if (hasBt) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-                if (hasLocation) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-
-                if (type != 0) {
-                    startForeground(NOTIFICATION_ID, notification, type)
-                } else {
-                    startForeground(NOTIFICATION_ID, notification)
-                }
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
-        } catch (e: Throwable) {
-            Log.e(TAG, "startForeground 异常拦截: ${e.message}", e)
+            graph.recorder.record(sample, result.snapshot, simulation)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            graph.runtime.postMessage("参数记录失败，请检查存储空间；事故检测继续运行")
         }
     }
 
-    private fun buildNotification(title: String, content: String): Notification {
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        return NotificationCompat.Builder(this, CHANNEL_SERVICE_ID)
-            .setContentTitle(title)
-            .setContentText(content)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
-    }
-
-    private fun updateNotification(title: String, content: String) {
-        try {
-            val manager = getSystemService(NotificationManager::class.java)
-            manager?.notify(NOTIFICATION_ID, buildNotification(title, content))
-        } catch (e: Throwable) {
-            Log.w(TAG, "更新通知失败: ${e.message}")
+    private fun runSimulation(rawScenario: String?) {
+        if ((graph.recorder.state.value.isRecording && !graph.recorder.isSimulationRecording) || graph.ble.state.value.phase in setOf(ConnectionPhase.READY, ConnectionPhase.STALE) ||
+            graph.incidents.state.value.stage in setOf(EmergencyStage.COUNTDOWN, EmergencyStage.LOCATING, EmergencyStage.SENDING)) {
+            graph.runtime.postMessage("请先停止记录、断开头盔并完成当前事故处理，再运行模拟演练")
+            return
+        }
+        val scenario = runCatching { MockScenario.valueOf(rawScenario.orEmpty()) }.getOrDefault(MockScenario.NORMAL_RIDE)
+        simulationJob?.cancel()
+        simulationJob = scope.launch {
+            simulationDetector.reset()
+            MockTelemetryEngine().play(scenario).collect { processSample(it, true) }
         }
     }
 
-    private fun observeState() {
-        val app = application as? HelmetGuardApp ?: return
-        val repo = app.repository
-
-        serviceScope.launch {
-            repo.connectionStatus.collect { status ->
-                val statusText = when (status) {
-                    ConnectionStatus.CONNECTED -> "头盔已连接 - 监测正常"
-                    ConnectionStatus.CONNECTING -> "正在重新连接头盔..."
-                    ConnectionStatus.DISCONNECTED -> "头盔已断开连接"
-                    ConnectionStatus.UNSTABLE -> "头盔连接不稳定"
-                    ConnectionStatus.UNBOUND -> "未绑定头盔"
+    private fun enterForeground(includeLocation: Boolean): Boolean {
+        val notification = GuardNotifications.monitoring(this, graph.ble.state.value, graph.recorder.state.value.isRecording)
+        val result = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                if (includeLocation && graph.location.hasForegroundPermission()) {
+                    type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
                 }
-                updateNotification("Helmet Guard", statusText)
-            }
+                startForeground(GuardNotifications.MONITORING_ID, notification, type)
+            } else startForeground(GuardNotifications.MONITORING_ID, notification)
         }
+        if (result.isFailure) {
+            graph.runtime.postMessage("无法启动守护服务，请检查蓝牙和定位权限")
+            if (!includeLocation) stopSelf()
+        }
+        return result.isSuccess
+    }
 
-        serviceScope.launch {
-            repo.accidentState.collect { state ->
-                if (state == AccidentLifecycleState.COUNTDOWN) {
-                    updateNotification("警告: 疑似发生事故", "正在进行事故倒计时确认，请在手机或头盔取消")
-                } else if (state == AccidentLifecycleState.SENT) {
-                    updateNotification("紧急提醒", "事故报警短信已成功提交")
-                }
-            }
-        }
+    companion object {
+        const val ACTION_START = "com.helmet.guard.action.START"
+        const val ACTION_STOP = "com.helmet.guard.action.STOP"
+        const val ACTION_SAFE = "com.helmet.guard.action.SAFE"
+        const val ACTION_SEND_NOW = "com.helmet.guard.action.SEND_NOW"
+        const val ACTION_MANUAL_SOS = "com.helmet.guard.action.MANUAL_SOS"
+        const val ACTION_LOCATION_MODE = "com.helmet.guard.action.LOCATION_MODE"
+        const val ACTION_RUN_SIMULATION = "com.helmet.guard.action.RUN_SIMULATION"
+        const val EXTRA_EVENT_ID = "event_id"
+        const val EXTRA_SIMULATION = "simulation"
+        const val EXTRA_SCENARIO = "scenario"
     }
 }

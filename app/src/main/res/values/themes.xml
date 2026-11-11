@@ -1,7 +1,9 @@
-<resources>
-    <style name="Theme.HelmetGuard" parent="android:Theme.Material.NoActionBar">
-        <item name="android:statusBarColor">@color/black_primary</item>
-        <item name="android:navigationBarColor">@color/black_primary</item>
-        <item name="android:windowBackground">@color/black_primary</item>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.HelmetGuard" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#07171D</item>
+        <item name="android:navigationBarColor">#07171D</item>
+        <item name="android:windowActionModeOverlay">true</item>
     </style>
 </resources>

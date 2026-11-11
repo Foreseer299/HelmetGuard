@@ -1,0 +1,72 @@
+{
+  "protocolVersion": 1,
+  "byteOrder": "little-endian",
+  "crc": {
+    "name": "CRC-8",
+    "polynomialHex": "07",
+    "initialHex": "00",
+    "reflected": false,
+    "xorOutHex": "00",
+    "coverage": "bytes 0 through 5+payloadLength inclusive; includes AA 55 header"
+  },
+  "vectors": [
+    {
+      "name": "button-double",
+      "type": 3,
+      "sequence": 8,
+      "payloadHex": "02",
+      "frameHex": "AA 55 01 03 08 01 02 0F"
+    },
+    {
+      "name": "telemetry-engineering-units",
+      "type": 1,
+      "sequence": 42,
+      "payloadHex": "04 03 02 01 64 00 38 FF D4 03 7D 00 1F FF 32 00 78 00 DD FF 84 03 57 07",
+      "frameHex": "AA 55 01 01 2A 18 04 03 02 01 64 00 38 FF D4 03 7D 00 1F FF 32 00 78 00 DD FF 84 03 57 07 3F",
+      "decoded": {
+        "deviceTimestampMs": 16909060,
+        "axG": 0.1,
+        "ayG": -0.2,
+        "azG": 0.98,
+        "gxDps": 12.5,
+        "gyDps": -22.5,
+        "gzDps": 5.0,
+        "rollDeg": 12.0,
+        "pitchDeg": -3.5,
+        "yawDeg": 90.0,
+        "batteryPercent": 87,
+        "statusFlags": 7
+      }
+    },
+    {
+      "name": "hardware-incident",
+      "type": 2,
+      "sequence": 43,
+      "payloadHex": "44 33 22 11 88 77 66 55 82 02 DB 02 19 00 0F 03",
+      "frameHex": "AA 55 01 02 2B 10 44 33 22 11 88 77 66 55 82 02 DB 02 19 00 0F 03 7B",
+      "decoded": {
+        "deviceIdHex": "11223344",
+        "eventIdHex": "55667788",
+        "impactPeakG": 6.42,
+        "gyroPeakDps": 731,
+        "stillDurationSeconds": 2.5,
+        "countdownSeconds": 15,
+        "flags": 3
+      }
+    },
+    {
+      "name": "command-find-five-seconds",
+      "type": 4,
+      "sequence": 1,
+      "payloadHex": "03 05",
+      "frameHex": "AA 55 01 04 01 02 03 05 11"
+    },
+    {
+      "name": "command-calibrate",
+      "type": 4,
+      "sequence": 2,
+      "payloadHex": "04",
+      "frameHex": "AA 55 01 04 02 01 04 F8"
+    }
+  ]
+}

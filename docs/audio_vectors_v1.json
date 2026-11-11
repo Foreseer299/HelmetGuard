@@ -1,0 +1,35 @@
+{
+  "schema": "helmetguard-audio-v1-test-vectors",
+  "byteOrder": "little-endian",
+  "nibbleOrder": "low-nibble-first",
+  "adpcmIsLossy": true,
+  "vectors": [
+    {
+      "name": "alternating_ramp_21_samples",
+      "originalPcm16": [0, 1000, -1000, 2000, -2000, 4000, -4000, 8000, -8000, 12000, -12000, 16000, -16000, 20000, -20000, 24000, -24000, 28000, -28000, 32000, -32000],
+      "adpcmBlockHex": "0000530015000A008090A2D3C4C4D4D5E6F6",
+      "expectedDecodedPcm16": [0, 2543, 231, 2333, -3400, 5286, -2610, 7439, -6918, 10282, -10530, 14653, -15818, 21044, -24009, 21044, -24009, 29236, -24009, 29236, -32200],
+      "assertion": "Android and ESP32 must decode the same ADPCM bytes to expectedDecodedPcm16. The decoded samples are not expected to equal originalPcm16."
+    }
+  ],
+  "crc16CcittFalse": {
+    "ascii": "123456789",
+    "expectedHex": "29B1"
+  },
+  "protocolFrames": {
+    "openSession11223344Hex": "0101443322110000000000007822",
+    "startPayloadOneBlockHex": "0101803E0001000001000001120000002003983A143C42731D38",
+    "startControlSession11223344Audio7Hex": "010244332211070000001A000101803E0001000001000001120000002003983A143C42731D38AB03",
+    "capabilitiesDecoderOnlyHex": "01010101803E0000000132008800F7004C9A",
+    "statusSession11223344Hex": "0100443322110300310000008C6E"
+  },
+  "authorization": {
+    "sampleRateHz": 16000,
+    "blockSamples": 256,
+    "startupBufferMs": 800,
+    "requiredInitialBlocks": 50,
+    "firstSequence": 0,
+    "initialAuthorizedThroughInclusive": 49,
+    "semantics": "cumulative inclusive authorization frontier, not delta credits"
+  }
+}

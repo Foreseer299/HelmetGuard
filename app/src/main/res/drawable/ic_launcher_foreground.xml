@@ -1,10 +1,4 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <!-- 安全头盔轮廓图标 (安全绿高对比度) -->
-    <path
-        android:fillColor="#00C853"
-        android:pathData="M54,24C38.5,24 26,36.5 26,52C26,59 28.5,65.5 33,70.5L33,80C33,82.2 34.8,84 37,84L71,84C73.2,84 75,82.2 75,80L75,70.5C79.5,65.5 82,59 82,52C82,36.5 69.5,24 54,24ZM54,32C65,32 74,41 74,52C74,55.5 73,59 71,62L37,62C35,59 34,55.5 34,52C34,41 43,32 54,32ZM40,70L68,70L68,76L40,76L40,70Z"/>
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#20D5C2" android:pathData="M54,18c-19.9,0 -36,16.1 -36,36v10h72V54c0,-19.9 -16.1,-36 -36,-36z"/>
+    <path android:fillColor="#FFFFFFFF" android:pathData="M31,67h46v8H31zM50,34h8v24h-8zM42,42h24v8H42z"/>
 </vector>

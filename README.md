@@ -1,96 +1,76 @@
-# Helmet Guard (智能头盔安全防护系统)
+# HelmetGuard · 骑行守护
 
-一款专为智能头盔设计的 Android 原生物联网安全伴侣应用。基于现代 Android 架构体系开发，通过 BLE 低功耗蓝牙与头盔端传感器保持高频通信，结合六轴 IMU 算法复合研判骑行状态，在发生严重碰撞或摔倒事故时自动启动防误触倒计时，并行预取高精度 GPS 坐标并零间隔向全部预设紧急联系人直发求救短信。
+每一次出发，都有回应。
 
----
+面向 ESP32-S3 智能头盔的 Android 应用：连接头盔、查看运动数据、处理事故提醒，并在骑行中播报短信、来电和接单通知。通知与语音在手机本地处理，不依赖 Google Play 服务。
 
-## 核心特性
+**当前版本：2.4.0** · Android 12 及以上 · ARM64
 
-- **BLE 实时传感器遥测**：采用 20Hz 高频六轴 IMU 遥测数据流解析（三轴加速度、三轴角速度、姿态角、电量），集成单调时钟数据新鲜度看门狗与 GATT 串行操作队列，杜绝特征写入冲突与虚假在线。
-- **复合事故研判状态机**：支持冲量碰撞研判与跌倒后静止检测双阶段复合判定，有效过滤颠簸与日常晃动。
-- **防误触与零延迟直发分发**：支持 15 秒（可调）防误触倒计时；倒计时触发瞬间后台异步预取高精度定位，倒计时自然归零瞬间 0 毫秒并发直发求救短信，支持多联系人独立分发与回执校验。
-- **联系人管理与启闭指示器**：二级管理界面提供紧急联系人增删改查、首选优先级设定，采用工业纯色方框实体绿块指示器，直观掌控求救目标。
-- **工业冷光仪表盘美学**：天然去雕饰设计风格，默认工业深冷色调高对比仪表盘，兼顾日间强光浅色防眩模式；内嵌实时人工地平仪与动态姿态波形。
-- **真实自检与硬隔离仿真**：内置 10 项软硬件运行环境与权限真实自检矩阵；支持多场景事故模拟仿真，仿真环境严格物理隔离，绝不外发真实求救短信。
+[下载 2.4.0 安装包](https://github.com/Foreseer299/HelmetGuard/releases/download/v2.4.0/HelmetGuard-2.4.0-debug.apk) · [新版说明](docs/RELEASE_2.4.0.md) · [保留的 2.1 版本](https://github.com/Foreseer299/HelmetGuard/tree/release/2.1) · [2.1 安装包](https://github.com/Foreseer299/HelmetGuard/releases/tag/v2.1.0)
 
----
+## 这次更新
 
-## 技术架构与依赖栈
+首页“守护”和第三页“数据”保留原有视觉设计。设备、记录、联系人、设置和通讯播报重新整理：常用操作直接可见，详细参数进入专项页面，每个重要操作配有用途说明。
 
-| 模块 / 维度 | 选型与技术栈 | 说明 |
-| :--- | :--- | :--- |
-| **开发语言** | Kotlin 1.9+ | 协程 Coroutines、StateFlow / SharedFlow 响应式状态管理 |
-| **界面框架** | Jetpack Compose + Material 3 | 全声明式 UI，深色/浅色自适应主题，零 XML 布局 |
-| **架构模式** | MVVM + Clean Architecture | 严格分层：Domain（领域契约）、Data（仓库与驱动）、Presentation（视图） |
-| **蓝牙通信** | Android Bluetooth Low Energy API | GATT 队列调度、CCCD 描述符管理、重连容灾机制 |
-| **本地存储** | Room Database v2 + DataStore Preferences | 支持平滑数据迁移（Migration 1->2）、参数持久化与字段默认值防崩溃 |
-| **定位与分发** | Fused Location Provider + SmsManager | 高精度定位预取、双卡与多短信分段 PendingIntent 隔离 |
+- **设备**：扫描、连接、校准、查找与重新连接；明确区分“连接成功”和“传感器数据正常”。
+- **记录**：参数记录与事故事件分开查看，可筛选演练；删除前确认，提交与送达回执分开解释。
+- **设置**：短信发送与无障碍有独立入口，权限、后台运行、求救资料不再挤在同一长页。
+- **通讯**：普通用户选择短信和来电，骑手可增加自己选择的接单应用；来源、内容、声音和诊断分页面管理。
+- **技术修补**：连接准备超时、失效回调、蓝牙权限撤销、位置时效与实时记录缓冲等问题一并修复。
 
----
+<p>
+<img src="docs/images/settings-240.png" width="245" alt="设置总览" />
+<img src="docs/images/device-240.png" width="245" alt="设备连接" />
+<img src="docs/images/communications-240.png" width="245" alt="通讯播报" />
+</p>
 
-## 工程目录结构
+截图来自 Android 测试环境，使用合成测试数据。
 
-```text
-app/src/main/java/com/helmet/guard/
-├── core/
-│   ├── ble/              # BLE 蓝牙连接管理、扫描与 GATT 操作队列
-│   ├── detector/         # 六轴 IMU 碰撞与跌倒复合事故研判算法
-│   ├── dispatcher/       # 短信分发器（SmsManager直发与仿真隔离）
-│   └── location/         # FusedLocationProvider 高精度定位与预取
-├── data/
-│   ├── database/         # Room 数据库定义、Entity 与 DAO
-│   ├── mock/             # 仿真引擎与测试场景数据流注入
-│   ├── preferences/      # DataStore 用户配置与安全参数持久化
-│   └── repository/       # 数据仓库实现与业务调度协同
-├── domain/
-│   ├── model/            # 领域核心实体模型与状态机定义
-│   └── repository/       # 仓库契约接口定义
-├── presentation/
-│   ├── common/           # 路由导航与全局事件
-│   ├── components/       # 工业仪表盘组件、人工地平仪、波形画布
-│   ├── countdown/        # 全屏防误触倒计时报警遮罩
-│   ├── device/           # 蓝牙设备扫描与配对连接页面
-│   ├── emergency/        # 紧急联系人管理二级页面
-│   ├── history/          # 历史事故与报警记录页面
-│   ├── home/             # 首页仪表盘与系统监控中心
-│   ├── selfcheck/        # 10 项系统与传感器自检矩阵页面
-│   ├── settings/         # 系统偏好设置与安全参数配置页面
-│   └── theme/            # 工业深冷色系与浅色防眩主题配置
-└── service/              # 前台保活服务与辅助服务
-```
+## 第一次使用
 
----
+1. **设置 → 紧急联系人**：添加并启用接收求救短信的人。
+2. **设置 → 权限与后台运行**：按实际状态完成授权和本机后台设置。
+3. **设置 → 短信发送与无障碍**：选择求救 SIM。只有系统反复要求点击“发送”时，才按需开启短信确认辅助；随后分别做亮屏和锁屏实测。
+4. **设备**：开启头盔并扫描连接，确认传感器数据已更新。
+5. **设置 → 通讯与语音**：打开通知使用权，选择提醒来源和内容。无头盔时如需验证声音，临时开启“手机测试播报”。
+6. 在安全环境进行模拟演练。**模拟事故不会真实发送求救短信**；“测试求救短信发送”则会发出标有“无需救援”的实际短信。
 
-## 快速构建与运行
+2.4.0 沿用 2.3.x 调试包名和签名，可覆盖安装；发布包为课程原型调试构建。升级无需清除已有记录。回退旧版请先导出需要的资料，Android 通常不允许直接降级安装。
 
-### 1. 环境要求
-- **Android Studio**：Ladybug (2024.2.1) / Koala / Hedgehog 或更新版本
-- **JDK**：OpenJDK 17 / Microsoft OpenJDK 17
-- **Android SDK**：
-  - `compileSdk`: 35
-  - `targetSdk`: 35
-  - `minSdk`: 26 (Android 8.0+)
-- **构建工具**：Gradle 8.10.2 (包含完整 Wrapper)
+## 给硬件与后端同学
 
-### 2. 本地编译指令
+| 内容 | 文档 |
+| --- | --- |
+| 安全协议与 2.1 联调约定 | [联调说明](docs/INTEGRATION_2.1.md) · [BLE 协议](docs/BLE_PROTOCOL.md) |
+| 动态头盔音频 | [BLE 音频协议](docs/AUDIO_PROTOCOL_V1_DRAFT.md) |
+| ESP32-S3 固件与接线 | [固件说明](firmware/README.md) |
+| 事故检测与实验 | [检测说明](docs/ACCIDENT_DETECTION.md) |
+| 手机与硬件测试 | [测试指南](docs/PHONE_AND_HELMET_TEST_GUIDE.md) |
+| 语音模型来源 | [TTS 说明](docs/THIRD_PARTY_TTS.md) |
 
-克隆工程到本地后，在项目根目录运行以下终端命令：
+项目目前没有独立 HTTP 云端后端。头盔通过 BLE 与手机协作；手机生成本地语音，兼容固件可接收并播放。真实 BLE 吞吐、扬声器输出、双卡与厂商锁屏行为需要对应实机验收。
+
+## 构建
+
+JDK 17、Android SDK 35、Kotlin / Jetpack Compose / Room / DataStore。
 
 ```bash
-# 运行全部单元测试
-./gradlew testDebugUnitTest
+# 准备固定版本的离线音色及运行库（脚本含哈希校验）
+bash scripts/prepare_embedded_tts.sh
+./gradlew testDebugUnitTest assembleDebug
 
-# 编译生成 Debug 测试安装包
-./gradlew assembleDebug
-
-# 编译生成 Release 正式发布包
-./gradlew assembleRelease
+# ESP32-S3 参考固件（需 PlatformIO）
+cd firmware
+pio test -e native
+pio run
 ```
 
-编译输出目录位于 `app/build/outputs/apk/`。
+Android 代码位于 `app/`，参考固件位于 `firmware/`，接口及验证说明位于 `docs/`。正式发布应配置自己的安全签名；不要将私钥提交到仓库。
 
----
+## 使用范围
 
-## 开源许可与声明
+短信提交成功与网络确认送达是不同状态，应用分别记录。无障碍辅助需主动开启，只处理符合识别条件的本应用短信确认，不代替授权、身份验证或解锁。Android 15 及以上重启后请打开应用确认通讯提醒服务恢复。
 
-本项目仅供学习、研发及技术原型评估使用。生产环境部署请结合具体硬件板卡传感参数与运营商规范进行实地测试与安全评估。
+内置小雅音色用于当前非商业课程原型，模型卡及运行库许可分别见 TTS 文档。此项目是辅助安全原型，不能保证所有事故均被识别，也不能代替专业救援设备。
+
+历史稳定入口保留在 `release/2.1`；仓库默认分支展示 2.4.0，不再把旧版说明作为主页。

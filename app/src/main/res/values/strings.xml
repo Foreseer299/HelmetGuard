@@ -1,36 +1,11 @@
 <resources>
-    <string name="app_name">Helmet Guard</string>
-    <string name="app_subtitle">智能头盔安全管理系统</string>
-
-    <!-- Navigation -->
-    <string name="nav_home">首页</string>
-    <string name="nav_sensor">传感器</string>
-    <string name="nav_device">设备</string>
-    <string name="nav_settings">设置</string>
-
-    <!-- Connection Status -->
-    <string name="status_connected">已连接</string>
-    <string name="status_connecting">正在连接</string>
-    <string name="status_disconnected">未连接</string>
-    <string name="status_unstable">连接不稳定</string>
-    <string name="status_unbound">尚未绑定头盔</string>
-
-    <!-- Accident Detection Status -->
-    <string name="accident_detection_enabled">事故检测已开启</string>
-    <string name="accident_detection_disabled">事故检测已关闭</string>
-    <string name="safety_status_normal">当前安全</string>
-    <string name="safety_status_suspected">检测到异常运动</string>
-    <string name="safety_status_countdown">即将发送报警</string>
-    <string name="safety_status_sent">报警信息已发送</string>
-    <string name="safety_status_cancelled">报警已取消</string>
-
-    <!-- Notification Channel -->
-    <string name="notification_channel_service">头盔监控服务</string>
-    <string name="notification_channel_service_desc">保持蓝牙连接与实时事故监测状态</string>
-    <string name="notification_channel_alert">紧急事故报警</string>
-    <string name="notification_channel_alert_desc">高优先级事故检测与警示通知</string>
-
-    <!-- Accessibility Service -->
-    <string name="sos_accessibility_service_label">Helmet Guard SOS 免拦截辅助</string>
-    <string name="sos_accessibility_service_description">智能头盔 SOS 免拦截辅助服务：在触发紧急报警发送短信时，自动确认手机系统的安全防扣费拦截弹窗，防止因 10 秒超时未确认导致求救短信发送失败。</string>
+    <string name="app_name">HelmetGuard 骑行守护</string>
+    <string name="channel_monitoring">头盔持续监测</string>
+    <string name="channel_monitoring_desc">显示蓝牙连接和实时监测状态</string>
+    <string name="channel_emergency">事故紧急报警</string>
+    <string name="channel_emergency_desc">疑似事故倒计时、声音和操作按钮</string>
+    <string name="action_cancel_alarm">我安全，取消报警</string>
+    <string name="action_send_now">立即求救</string>
+    <string name="sms_confirmation_label">HelmetGuard 求救短信确认辅助</string>
+    <string name="sms_confirmation_description">授权后，仅在 HelmetGuard 提交真实求救短信或你明确启用辅助的测试短信时，识别本应用的系统短信发送确认并点击发送。屏幕内容仅在本机即时判断。</string>
 </resources>

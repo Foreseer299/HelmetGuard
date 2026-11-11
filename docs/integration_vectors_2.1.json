@@ -1,0 +1,47 @@
+{
+  "protocolVersion": 1,
+  "byteOrder": "little-endian",
+  "purpose": "ACK/Cancel supplement; use together with protocol_vectors.json",
+  "vectors": [
+    {
+      "name": "ack-published-incident",
+      "type": 4,
+      "sequence": 44,
+      "command": 1,
+      "eventIdHex": "55667788",
+      "argument": 0,
+      "payloadHex": "01 88 77 66 55 00",
+      "frameHex": "AA 55 01 04 2C 06 01 88 77 66 55 00 39"
+    },
+    {
+      "name": "cancel-published-incident",
+      "type": 4,
+      "sequence": 45,
+      "command": 2,
+      "eventIdHex": "55667788",
+      "argument": 0,
+      "payloadHex": "02 88 77 66 55 00",
+      "frameHex": "AA 55 01 04 2D 06 02 88 77 66 55 00 51"
+    },
+    {
+      "name": "ack-unsigned-event",
+      "type": 4,
+      "sequence": 46,
+      "command": 1,
+      "eventIdHex": "F1234567",
+      "argument": 0,
+      "payloadHex": "01 67 45 23 F1 00",
+      "frameHex": "AA 55 01 04 2E 06 01 67 45 23 F1 00 9B"
+    },
+    {
+      "name": "cancel-unsigned-event",
+      "type": 4,
+      "sequence": 47,
+      "command": 2,
+      "eventIdHex": "F1234567",
+      "argument": 0,
+      "payloadHex": "02 67 45 23 F1 00",
+      "frameHex": "AA 55 01 04 2F 06 02 67 45 23 F1 00 F3"
+    }
+  ]
+}
