@@ -8,6 +8,7 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
+import android.os.SystemClock
 import android.os.Looper
 import androidx.core.content.ContextCompat
 import com.helmet.guard.domain.LocationFix
@@ -54,20 +55,23 @@ class NativeLocationProvider(private val context: Context) {
         val lastKnown = providers.mapNotNull { runCatching { locationManager.getLastKnownLocation(it) }.getOrNull() }
             .filter { it.isRecentAndValid() }
             .maxWithOrNull(compareBy<Location> { quality(it) }.thenBy { it.time })
-        val fresh = lastKnown?.takeIf { System.currentTimeMillis() - it.time <= 30_000 && it.hasAccuracy() && it.accuracy <= 80f }
+        val fresh = lastKnown?.takeIf { (it.ageMs() ?: Long.MAX_VALUE) <= 30_000 && it.hasAccuracy() && it.accuracy <= 80f }
         if (fresh != null) return LocationOutcome.Success(fresh.toDomain(historical = true))
 
         val bestObserved = java.util.concurrent.atomic.AtomicReference<Location?>(null)
         val current = withTimeoutOrNull(timeoutMs) {
             suspendCancellableCoroutine<Location?> { continuation ->
                 val finished = AtomicBoolean(false)
+                val registrationLock = Any()
                 var best: Location? = null
                 lateinit var listener: LocationListener
 
                 fun finish(value: Location?) {
-                    if (finished.compareAndSet(false, true)) {
-                        runCatching { locationManager.removeUpdates(listener) }
-                        if (continuation.isActive) continuation.resume(value)
+                    synchronized(registrationLock) {
+                        if (finished.compareAndSet(false, true)) {
+                            runCatching { locationManager.removeUpdates(listener) }
+                            if (continuation.isActive) continuation.resume(value)
+                        }
                     }
                 }
 
@@ -86,10 +90,21 @@ class NativeLocationProvider(private val context: Context) {
                     @Deprecated("Deprecated by Android") override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
                 }
                 continuation.invokeOnCancellation {
-                    if (finished.compareAndSet(false, true)) runCatching { locationManager.removeUpdates(listener) }
+                    synchronized(registrationLock) {
+                        if (finished.compareAndSet(false, true)) runCatching { locationManager.removeUpdates(listener) }
+                    }
                 }
-                providers.forEach { provider ->
-                    runCatching { locationManager.requestLocationUpdates(provider, 0L, 0f, listener, Looper.getMainLooper()) }
+                synchronized(registrationLock) {
+                    var registered = false
+                    providers.forEach { provider ->
+                        if (!finished.get() && continuation.isActive) {
+                            registered = runCatching {
+                                locationManager.requestLocationUpdates(provider, 0L, 0f, listener, Looper.getMainLooper())
+                                true
+                            }.getOrDefault(false) || registered
+                        }
+                    }
+                    if (!registered) finish(null)
                 }
             }
         }
@@ -102,11 +117,13 @@ class NativeLocationProvider(private val context: Context) {
     }
 
     private fun Location.isRecentAndValid(): Boolean =
-        System.currentTimeMillis() - time in 0L..300_000L &&
+        ageMs()?.let { it in 0L..300_000L } == true &&
             latitude.isFinite() && longitude.isFinite() && latitude in -90.0..90.0 && longitude in -180.0..180.0
 
+    private fun Location.ageMs(): Long? = locationAgeMs(elapsedRealtimeNanos, SystemClock.elapsedRealtimeNanos(), time, System.currentTimeMillis())
+
     private fun quality(location: Location): Double {
-        val agePenalty = ((System.currentTimeMillis() - location.time).coerceAtLeast(0) / 1_000.0).coerceAtMost(3_600.0)
+        val agePenalty = ((location.ageMs() ?: Long.MAX_VALUE) / 1_000.0).coerceAtMost(3_600.0)
         val accuracyPenalty = if (location.hasAccuracy()) location.accuracy.toDouble() else 1_000.0
         return -accuracyPenalty - agePenalty * 0.4
     }

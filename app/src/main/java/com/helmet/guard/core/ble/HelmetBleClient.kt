@@ -27,6 +27,7 @@ import com.helmet.guard.domain.ConnectionPhase
 import com.helmet.guard.domain.ConnectionState
 import com.helmet.guard.domain.HelmetDevice
 import com.helmet.guard.domain.TelemetrySample
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -67,7 +68,9 @@ class HelmetBleClient(private val context: Context) {
     private val _audioStatuses = MutableSharedFlow<AudioStatus>(extraBufferCapacity = 64)
     val audioStatuses: SharedFlow<AudioStatus> = _audioStatuses.asSharedFlow()
 
-    private var gatt: BluetoothGatt? = null
+    @Volatile private var gatt: BluetoothGatt? = null
+    private var connectionTimeout: Job? = null
+    @Volatile private var connectedElapsedMs = 0L
     private var targetAddress: String? = null
     private var explicitDisconnect = false
     private var reconnectAttempt = 0
@@ -83,15 +86,21 @@ class HelmetBleClient(private val context: Context) {
     private data class QueuedOperation(val kind: OperationKind, val action: () -> Boolean)
     private val operations = ArrayDeque<QueuedOperation>()
     private var operationBusy = false
+    private val operationGeneration = OperationGeneration()
     private var operationTimeout: Job? = null
 
     init {
         scope.launch {
             while (isActive) {
                 delay(1_000)
+                if (gatt != null && !hasPermissions()) {
+                    disconnect()
+                    _state.value = _state.value.copy(phase = ConnectionPhase.PERMISSION_REQUIRED, message = "蓝牙权限已被关闭，请重新授权后连接")
+                    continue
+                }
                 val current = _state.value
-                if (current.phase == ConnectionPhase.READY && current.lastPacketElapsedMs > 0 &&
-                    SystemClock.elapsedRealtime() - current.lastPacketElapsedMs > 3_000
+                if (current.phase == ConnectionPhase.READY && connectedElapsedMs > 0 &&
+                    SystemClock.elapsedRealtime() - maxOf(current.lastPacketElapsedMs, connectedElapsedMs) > 3_000
                 ) {
                     _state.value = current.copy(phase = ConnectionPhase.STALE, message = "连接存在，但传感器数据已中断")
                 }
@@ -108,16 +117,21 @@ class HelmetBleClient(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun startScan() {
+        if (gatt != null) {
+            _state.value = _state.value.copy(message = "请先断开当前头盔，再扫描其他设备")
+            return
+        }
+        reconnectJob?.cancel()
         if (!hasPermissions()) {
             _state.value = _state.value.copy(phase = ConnectionPhase.PERMISSION_REQUIRED, message = "需要附近设备权限")
             return
         }
         val bluetoothAdapter = adapter
-        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
+        if (bluetoothAdapter == null || !runCatching { bluetoothAdapter.isEnabled }.getOrDefault(false)) {
             _state.value = _state.value.copy(phase = ConnectionPhase.BLUETOOTH_OFF, message = "请开启蓝牙")
             return
         }
-        val scanner = bluetoothAdapter.bluetoothLeScanner ?: run {
+        val scanner = runCatching { bluetoothAdapter.bluetoothLeScanner }.getOrNull() ?: run {
             _state.value = _state.value.copy(phase = ConnectionPhase.ERROR, message = "系统蓝牙扫描器不可用，请关闭再开启蓝牙")
             return
         }
@@ -127,9 +141,10 @@ class HelmetBleClient(private val context: Context) {
         _devices.value = emptyList()
         _state.value = _state.value.copy(phase = ConnectionPhase.SCANNING, message = "正在搜索附近 BLE 设备（12 秒）")
         runCatching {
-            scanner.startScan(null, ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), scanCallback)
             scannerRunning = true
+            scanner.startScan(null, ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), scanCallback)
         }.onFailure {
+            scannerRunning = false
             _state.value = _state.value.copy(phase = ConnectionPhase.ERROR, message = "无法开始扫描：${it.message ?: "系统拒绝"}")
             return
         }
@@ -154,12 +169,13 @@ class HelmetBleClient(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun connect(address: String) {
+        synchronized(operations) {
         if (!hasPermissions()) {
             _state.value = _state.value.copy(phase = ConnectionPhase.PERMISSION_REQUIRED, message = "缺少蓝牙权限")
             return
         }
         val bluetoothAdapter = adapter
-        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
+        if (bluetoothAdapter == null || !runCatching { bluetoothAdapter.isEnabled }.getOrDefault(false)) {
             _state.value = _state.value.copy(phase = ConnectionPhase.BLUETOOTH_OFF, message = "蓝牙未开启")
             return
         }
@@ -175,17 +191,35 @@ class HelmetBleClient(private val context: Context) {
         closeCurrentGatt()
         telemetryDecoder.reset()
         eventDecoder.reset()
+        expectedSubscriptions = 0
+        completedSubscriptions = 0
         _audioCapabilities.value = null
         sequenceTracker.resetConnection()
-        _state.value = ConnectionState(ConnectionPhase.CONNECTING, HelmetDevice(device.name ?: "HelmetGuard", address), message = "正在连接")
-        gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
-        } else device.connectGatt(context, false, callback)
+        _state.value = ConnectionState(ConnectionPhase.CONNECTING, HelmetDevice(runCatching { device.name }.getOrNull() ?: "HelmetGuard", address), message = "正在连接")
+        gatt = runCatching { device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE) }.getOrNull()
+        val active = gatt
+        if (active == null) {
+            _state.value = _state.value.copy(phase = if (hasPermissions()) ConnectionPhase.ERROR else ConnectionPhase.PERMISSION_REQUIRED,
+                message = "系统未能建立蓝牙连接，请检查权限和蓝牙开关后重试")
+            return
+        }
+        // Some OEM stacks never call back on failed connection/MTU/service discovery.
+        connectionTimeout = scope.launch {
+            delay(20_000)
+            synchronized(operations) {
+                if (gatt === active && _state.value.phase in setOf(ConnectionPhase.CONNECTING, ConnectionPhase.NEGOTIATING, ConnectionPhase.DISCOVERING, ConnectionPhase.SUBSCRIBING)) {
+                    failAndReconnect("连接准备超时，正在重新连接头盔")
+                }
+            }
+        }
+    }
     }
 
     @SuppressLint("MissingPermission")
     fun disconnect(forgetTarget: Boolean = false) {
+        synchronized(operations) {
         explicitDisconnect = true
+        stopScan()
         reconnectJob?.cancel()
         clearOperations()
         runCatching { gatt?.disconnect() }
@@ -198,6 +232,7 @@ class HelmetBleClient(private val context: Context) {
             message = if (forgetTarget) "未绑定头盔" else "已断开"
         )
     }
+    }
 
     fun reconnect(address: String? = targetAddress) {
         if (!address.isNullOrBlank() && _state.value.phase !in setOf(ConnectionPhase.CONNECTING, ConnectionPhase.NEGOTIATING, ConnectionPhase.DISCOVERING, ConnectionPhase.SUBSCRIBING, ConnectionPhase.READY)) {
@@ -207,6 +242,7 @@ class HelmetBleClient(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun sendCommand(command: Byte, eventId: Long = 0, argument: Int = 0): Boolean {
+        if (!hasPermissions()) return false
         val active = gatt ?: return false
         val service = active.getService(HelmetProtocol.SERVICE_UUID) ?: return false
         val characteristic = service.getCharacteristic(HelmetProtocol.COMMAND_UUID) ?: return false
@@ -309,6 +345,7 @@ class HelmetBleClient(private val context: Context) {
     private val scanCallback = object : ScanCallback() {
         @SuppressLint("MissingPermission")
         override fun onScanResult(callbackType: Int, result: ScanResult) {
+            if (!scannerRunning || !hasPermissions()) return
             val record = result.scanRecord
             val advertisedName = runCatching { result.device.name }.getOrNull() ?: record?.deviceName
             val advertisesService = record?.serviceUuids?.contains(ParcelUuid(HelmetProtocol.SERVICE_UUID)) == true
@@ -332,6 +369,7 @@ class HelmetBleClient(private val context: Context) {
         }
 
         override fun onScanFailed(errorCode: Int) {
+            if (!scannerRunning || gatt != null) return
             scannerRunning = false
             val reason = when (errorCode) {
                 ScanCallback.SCAN_FAILED_ALREADY_STARTED -> "扫描已经在运行"
@@ -357,9 +395,8 @@ class HelmetBleClient(private val context: Context) {
             }
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
-                    reconnectAttempt = 0
                     _state.value = _state.value.copy(phase = ConnectionPhase.NEGOTIATING, message = "正在协商通信参数")
-                    if (!callbackGatt.requestMtu(HelmetProtocol.DESIRED_MTU)) {
+                    if (!runCatching { callbackGatt.requestMtu(HelmetProtocol.DESIRED_MTU) }.getOrDefault(false)) {
                         _state.value = _state.value.copy(mtu = 23)
                         discover(callbackGatt)
                     }
@@ -371,8 +408,9 @@ class HelmetBleClient(private val context: Context) {
         @SuppressLint("MissingPermission")
         override fun onMtuChanged(callbackGatt: BluetoothGatt, mtu: Int, status: Int) {
             if (callbackGatt !== gatt) return
+            val negotiating = _state.value.phase == ConnectionPhase.NEGOTIATING
             _state.value = _state.value.copy(mtu = if (status == BluetoothGatt.GATT_SUCCESS) mtu else 23)
-            discover(callbackGatt)
+            if (negotiating) discover(callbackGatt)
         }
 
         @SuppressLint("MissingPermission")
@@ -405,9 +443,13 @@ class HelmetBleClient(private val context: Context) {
         override fun onDescriptorWrite(callbackGatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
             if (callbackGatt !== gatt) return
             completeOperation(status == BluetoothGatt.GATT_SUCCESS)
+            if (callbackGatt !== gatt) return
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 completedSubscriptions++
                 if (completedSubscriptions >= expectedSubscriptions) {
+                    connectionTimeout?.cancel()
+                    reconnectAttempt = 0
+                    connectedElapsedMs = SystemClock.elapsedRealtime()
                     _state.value = _state.value.copy(
                         phase = ConnectionPhase.READY,
                         subscribedCharacteristics = completedSubscriptions,
@@ -455,7 +497,7 @@ class HelmetBleClient(private val context: Context) {
     private fun discover(active: BluetoothGatt) {
         if (active !== gatt) return
         _state.value = _state.value.copy(phase = ConnectionPhase.DISCOVERING, message = "正在发现头盔服务")
-        if (!active.discoverServices()) failAndReconnect("无法启动服务发现")
+        if (!runCatching { active.discoverServices() }.getOrDefault(false)) failAndReconnect("无法启动服务发现，请检查蓝牙权限")
     }
 
     @SuppressLint("MissingPermission")
@@ -493,7 +535,7 @@ class HelmetBleClient(private val context: Context) {
             when (frame.type) {
                 HelmetProtocol.TYPE_TELEMETRY -> HelmetFrameCodec.telemetry(frame, SystemClock.elapsedRealtime(), System.currentTimeMillis())?.let {
                     _state.value = _state.value.copy(
-                        phase = ConnectionPhase.READY,
+                        phase = if (completedSubscriptions >= expectedSubscriptions && expectedSubscriptions > 0) ConnectionPhase.READY else _state.value.phase,
                         device = _state.value.device?.copy(batteryPercent = if (it.batteryValid) it.batteryPercent else null, lastSeenMs = it.receivedAtMs),
                         lastPacketElapsedMs = it.receivedElapsedMs,
                         message = "安全监测运行中"
@@ -523,42 +565,61 @@ class HelmetBleClient(private val context: Context) {
     }
 
     private fun processNextOperation() {
-        val operation = synchronized(operations) {
+        val (operation, generation, timeout) = synchronized(operations) {
             if (operationBusy || operations.isEmpty()) return
             operationBusy = true
-            operations.removeFirst()
+            val generation = operationGeneration.begin()
+            val timeout = scope.launch(start = CoroutineStart.LAZY) {
+                delay(5_000)
+                synchronized(operations) {
+                    if (operationGeneration.finish(generation)) failAndReconnect("蓝牙操作超时，连接已重置")
+                }
+            }
+            operationTimeout = timeout
+            Triple(operations.removeFirst(), generation, timeout)
         }
+        // Arm before calling Android: an immediate callback must cancel this timer, not its
+        // successor's. A timed-out GATT is closed before another queued write can start.
+        timeout.start()
+        if (!synchronized(operations) { operationGeneration.isCurrent(generation) }) return
         val started = runCatching { operation.action() }.getOrDefault(false)
-        if (!started) {
-            completeOperation(false)
-            return
-        }
-        operationTimeout?.cancel()
-        operationTimeout = scope.launch {
-            delay(5_000)
-            completeOperation(false)
+        if (!started) synchronized(operations) {
+            if (operationGeneration.isCurrent(generation)) completeOperation(false)
         }
     }
 
     private fun completeOperation(success: Boolean) {
-        synchronized(operations) { operationBusy = false }
-        operationTimeout?.cancel()
-        if (!success && _state.value.phase == ConnectionPhase.SUBSCRIBING) {
-            clearOperations()
-            failAndReconnect("GATT 通知订阅超时或失败")
-            return
+        synchronized(operations) {
+            if (!operationBusy) return
+            operationBusy = false
+            operationGeneration.clear()
+            operationTimeout?.cancel()
+            operationTimeout = null
+            if (!success && _state.value.phase == ConnectionPhase.SUBSCRIBING) {
+                clearOperations()
+                failAndReconnect("GATT 通知订阅超时或失败")
+                return
+            }
         }
         processNextOperation()
     }
 
     private fun clearOperations() {
-        synchronized(operations) { operations.clear(); operationBusy = false }
-        operationTimeout?.cancel()
+        synchronized(operations) {
+            operations.clear()
+            operationBusy = false
+            operationGeneration.clear()
+            operationTimeout?.cancel()
+            operationTimeout = null
+        }
     }
 
     @SuppressLint("MissingPermission")
     private fun handleDisconnect(callbackGatt: BluetoothGatt, message: String) {
+        synchronized(operations) {
         if (callbackGatt !== gatt) return
+        connectionTimeout?.cancel()
+        connectedElapsedMs = 0L
         clearOperations()
         runCatching { callbackGatt.close() }
         gatt = null
@@ -567,6 +628,7 @@ class HelmetBleClient(private val context: Context) {
         _audioCapabilities.value = null
         _state.value = _state.value.copy(phase = ConnectionPhase.DISCONNECTED, message = message)
         if (!explicitDisconnect) scheduleReconnect()
+    }
     }
 
     private fun failAndReconnect(message: String) {
@@ -577,8 +639,11 @@ class HelmetBleClient(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     private fun failWithoutReconnect(message: String) {
+        synchronized(operations) {
         explicitDisconnect = true
         reconnectJob?.cancel()
+        connectionTimeout?.cancel()
+        connectedElapsedMs = 0L
         clearOperations()
         val active = gatt
         gatt = null
@@ -589,6 +654,7 @@ class HelmetBleClient(private val context: Context) {
         eventDecoder.reset()
         _audioCapabilities.value = null
         _state.value = _state.value.copy(phase = ConnectionPhase.ERROR, message = message)
+    }
     }
 
     private fun scheduleReconnect() {
@@ -604,6 +670,8 @@ class HelmetBleClient(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     private fun closeCurrentGatt() {
+        connectionTimeout?.cancel()
+        connectedElapsedMs = 0L
         val old = gatt
         gatt = null
         runCatching { old?.close() }

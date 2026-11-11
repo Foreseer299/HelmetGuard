@@ -1,103 +1,76 @@
-> 当前版本 **2.3.3**。在“设置”页验证锁屏短信并按需开启确认辅助，见 [实测说明](docs/RELEASE_2.3.3.md)。
+# HelmetGuard · 骑行守护
 
-# HelmetGuard 2.2.0-alpha01
+每一次出发，都有回应。
 
-面向 **ESP32-S3 + MPU6050 智能头盔**的 Android 安全应用。从 2.0 起项目采用全新架构，不依赖旧版实现，也不依赖 Google Play 服务；重点适配华为 **HarmonyOS 4** 及国内 Android ROM。
+面向 ESP32-S3 智能头盔的 Android 应用：连接头盔、查看运动数据、处理事故提醒，并在骑行中播报短信、来电和接单通知。通知与语音在手机本地处理，不依赖 Google Play 服务。
 
-> HelmetGuard 是辅助安全产品，不能替代 120/110、专业救援设备或医疗判断。仅凭单个 IMU 无法在所有环境中保证零误报、零漏报。
+**当前版本：2.4.0** · Android 12 及以上 · ARM64
 
-2.2 alpha01 在 2.1 安全能力上加入通知监听、双卡来电生命周期、本地中文 TTS/PCM/IMA-ADPCM、BLE Audio v1 软件协议、脱敏诊断 ZIP 和播报设置页。详见 [2.2 alpha01 说明](docs/RELEASE_2.2_ALPHA01.md) 与 [音频协议草案](docs/AUDIO_PROTOCOL_V1_DRAFT.md)。
+[下载 2.4.0 安装包](https://github.com/Foreseer299/HelmetGuard/releases/download/v2.4.0/HelmetGuard-2.4.0-debug.apk) · [新版说明](docs/RELEASE_2.4.0.md) · [保留的 2.1 版本](https://github.com/Foreseer299/HelmetGuard/tree/release/2.1) · [2.1 安装包](https://github.com/Foreseer299/HelmetGuard/releases/tag/v2.1.0)
 
-> 当前是**软件原型**：Android 与 ESP32 固定向量、构建和原生测试已通过；固件明确报告 `outputReady=false`。MAX98357A/I²S 实物播放、加密吞吐、事故抢占台架测试均未宣称通过。
+## 这次更新
 
-给固件/后端同学：[2.1 联调接口与验收说明](docs/INTEGRATION_2.1.md)仍适用于安全协议 FFF0–FFF3；动态音频使用独立 8F7A000x 服务。当前项目无独立 HTTP 云端 API。
+首页“守护”和第三页“数据”保留原有视觉设计。设备、记录、联系人、设置和通讯播报重新整理：常用操作直接可见，详细参数进入专项页面，每个重要操作配有用途说明。
 
-## 核心能力
+- **设备**：扫描、连接、校准、查找与重新连接；明确区分“连接成功”和“传感器数据正常”。
+- **记录**：参数记录与事故事件分开查看，可筛选演练；删除前确认，提交与送达回执分开解释。
+- **设置**：短信发送与无障碍有独立入口，权限、后台运行、求救资料不再挤在同一长页。
+- **通讯**：普通用户选择短信和来电，骑手可增加自己选择的接单应用；来源、内容、声音和诊断分页面管理。
+- **技术修补**：连接准备超时、失效回调、蓝牙权限撤销、位置时效与实时记录缓冲等问题一并修复。
 
-- BLE 可靠状态机：扫描、MTU、服务发现、双特征订阅、READY、超时、分包组帧、CRC、丢帧统计和指数退避重连。
-- ESP32-S3 / 旧版 FFF0–FFF3 UUID 与二进制帧协议兼容。
-- 提供可编译的 ESP32-S3 参考固件：MPU6050 采样、姿态融合、蜂鸣器、按键、NVS 事件号、看门狗与硬件降级检测。
-- MPU6050 实时加速度、角速度、姿态、电量、健康和校准状态。
-- 多阶段事故检测：冲击、旋转、姿态、自由落体、碰撞前运动、碰撞后静止联合评分。
-- 专门抑制减速带和未佩戴头盔掉落两类常见误报。
-- 可选择参数的实验记录：场景标签、备注、回看曲线/统计和 CSV 导出。
-- 真实事故倒计时：通知操作“我安全”和“立即求救”，进程重启后恢复。
-- Android 原生 `LocationManager` 定位，无 GMS 的 HarmonyOS 4 手机可用。
-- 多联系人、多 SIM、短信分段提交/送达 `PendingIntent` 回执和失败状态持久化。
-- 国内 ROM 可靠性中心：华为/荣耀、小米/Redmi、OPPO/一加/realme、vivo/iQOO、三星指引。
-- 配套设备系统关联、`connectedDevice` 前台服务、开机恢复和有硬超时的短时 WakeLock。
-- 正常骑行、减速带、头盔掉落和碰撞特征四类无副作用模拟实验。
-- 通知监听面向骑手端新订单、指派/改派、取消、超时、变更和重要联系；未知来源默认不播报。
-- API 31 `TelephonyCallback` 双卡来电生命周期，拨号器通知只补充身份；号码不可安全确认时只说“有来电”。
-- 手机本地 TTS→PCM16→16 kHz 单声道→独立块 IMA-ADPCM；Android/ESP32 共享固定向量。
-- 累计 `authorizedThrough` 流控：800 ms 启动缓冲为 50 块，重复或迟到状态不会重复增加额度。
-- 设置页提供来源、内容程度、实际可用中文 TTS 音色试听、语速、音调、音量和一键脱敏诊断 ZIP。
+<p>
+<img src="docs/images/settings-240.png" width="245" alt="设置总览" />
+<img src="docs/images/device-240.png" width="245" alt="设备连接" />
+<img src="docs/images/communications-240.png" width="245" alt="通讯播报" />
+</p>
 
-## 安全边界
+截图来自 Android 测试环境，使用合成测试数据。
 
-- **模拟事件绝不发送真实短信，也不执行真实定位。**
-- 可选无障碍服务仅在已提交求救短信时识别本应用的系统发送确认。系统授权与短信回执分别核验。
-- 不谎报“短信成功”：只有系统 `SENT` 回执成功才记为运营商接受；`DELIVERED` 单独记录。
-- 品牌“自启动/后台保护”通常无法由普通应用读取，界面明确标注为人工确认。
-- Release 不使用 debug 签名；正式签名由 CI 或本地安全配置提供。
+## 第一次使用
 
-## 工程环境
+1. **设置 → 紧急联系人**：添加并启用接收求救短信的人。
+2. **设置 → 权限与后台运行**：按实际状态完成授权和本机后台设置。
+3. **设置 → 短信发送与无障碍**：选择求救 SIM。只有系统反复要求点击“发送”时，才按需开启短信确认辅助；随后分别做亮屏和锁屏实测。
+4. **设备**：开启头盔并扫描连接，确认传感器数据已更新。
+5. **设置 → 通讯与语音**：打开通知使用权，选择提醒来源和内容。无头盔时如需验证声音，临时开启“手机测试播报”。
+6. 在安全环境进行模拟演练。**模拟事故不会真实发送求救短信**；“测试求救短信发送”则会发出标有“无需救援”的实际短信。
 
-- Android Studio Ladybug 或更新版本
-- JDK 17
-- Android SDK 35
-- 最低 Android 12（API 31），目标 API 35
-- Kotlin 2.0 / Jetpack Compose / Room / DataStore
+2.4.0 沿用 2.3.x 调试包名和签名，可覆盖安装；发布包为课程原型调试构建。升级无需清除已有记录。回退旧版请先导出需要的资料，Android 通常不允许直接降级安装。
+
+## 给硬件与后端同学
+
+| 内容 | 文档 |
+| --- | --- |
+| 安全协议与 2.1 联调约定 | [联调说明](docs/INTEGRATION_2.1.md) · [BLE 协议](docs/BLE_PROTOCOL.md) |
+| 动态头盔音频 | [BLE 音频协议](docs/AUDIO_PROTOCOL_V1_DRAFT.md) |
+| ESP32-S3 固件与接线 | [固件说明](firmware/README.md) |
+| 事故检测与实验 | [检测说明](docs/ACCIDENT_DETECTION.md) |
+| 手机与硬件测试 | [测试指南](docs/PHONE_AND_HELMET_TEST_GUIDE.md) |
+| 语音模型来源 | [TTS 说明](docs/THIRD_PARTY_TTS.md) |
+
+项目目前没有独立 HTTP 云端后端。头盔通过 BLE 与手机协作；手机生成本地语音，兼容固件可接收并播放。真实 BLE 吞吐、扬声器输出、双卡与厂商锁屏行为需要对应实机验收。
+
+## 构建
+
+JDK 17、Android SDK 35、Kotlin / Jetpack Compose / Room / DataStore。
 
 ```bash
-./gradlew testDebugUnitTest
-./gradlew assembleDebug
+# 准备固定版本的离线音色及运行库（脚本含哈希校验）
+bash scripts/prepare_embedded_tts.sh
+./gradlew testDebugUnitTest assembleDebug
 
-# 可选：编译/烧录 ESP32-S3 固件
+# ESP32-S3 参考固件（需 PlatformIO）
 cd firmware
 pio test -e native
 pio run
-pio run -t upload
 ```
 
-硬件接线、电池安全分压和首次校准说明见 [`firmware/README.md`](firmware/README.md)。
+Android 代码位于 `app/`，参考固件位于 `firmware/`，接口及验证说明位于 `docs/`。正式发布应配置自己的安全签名；不要将私钥提交到仓库。
 
-首次安装后：
+## 使用范围
 
-1. 授予附近设备、精确定位、短信、电话状态和通知权限；后台定位需在系统应用权限页选择“始终允许”。
-2. 添加至少一位已征得同意的紧急联系人。
-3. 双卡手机必须选择求救 SIM。
-4. 在“可靠性中心”完成对应品牌的自启动、后台活动和电池优化设置。
-5. 在“设备”页先执行系统配套设备关联，再扫描并绑定 HelmetGuard。
-6. 在“设置 → 通知与头盔语音”打开系统通知使用权，选择来源、内容程度和手机实际可用的 TTS 音色。
-7. 开启骑行守护；只有状态为 `READY` 才代表安全数据通知真正可用。
-8. 先用模拟实验验证倒计时和算法，再在安全、受控环境标定硬件；音频在 `outputReady=false` 阶段不会被当作已播放。
+短信提交成功与网络确认送达是不同状态，应用分别记录。无障碍辅助需主动开启，只处理符合识别条件的本应用短信确认，不代替授权、身份验证或解锁。Android 15 及以上重启后请打开应用确认通讯提醒服务恢复。
 
-## 目录
+内置小雅音色用于当前非商业课程原型，模型卡及运行库许可分别见 TTS 文档。此项目是辅助安全原型，不能保证所有事故均被识别，也不能代替专业救援设备。
 
-```text
-app/src/main/java/com/helmet/guard/
-├── core/          # BLE、检测、原生定位、短信、ROM 兼容
-├── data/          # Room、DataStore、可选遥测记录/CSV
-├── domain/        # 不依赖 UI 的领域模型
-├── service/       # 前台守护、事故协调、通知与恢复
-└── ui/            # 全新 Compose 产品界面
-firmware/        # PlatformIO ESP32-S3 参考固件与原生协议测试
-docs/
-├── BLE_PROTOCOL.md
-├── ACCIDENT_DETECTION.md
-├── CHINA_ROM_GUIDE.md
-└── TEST_PLAN.md
-```
-
-## 硬件建议
-
-现有 ESP32-S3、GY-521/MPU6050、有源蜂鸣器、微动按键、18650/锂电池和 TP4056 可完成原型。正式道路产品至少应增加：
-
-- 佩戴检测（电容/压力/光学），用于可靠区分“人摔倒”和“头盔掉落”；
-- 电池电量计、温度保护、合规 BMS 与保险；
-- 固定 PCB、抗震连接器、防水外壳，不使用面包板上路；
-- 看门狗、掉电保护、蜂鸣器硬件降级报警和固件 OTA 回滚；
-- 大量实骑与受控冲击数据标定，不能仅用桌面跌落实验。
-
-协议细节、阈值逻辑和验收矩阵见 [`docs/`](docs/)。
+历史稳定入口保留在 `release/2.1`；仓库默认分支展示 2.4.0，不再把旧版说明作为主页。

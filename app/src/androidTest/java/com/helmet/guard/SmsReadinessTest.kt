@@ -30,6 +30,7 @@ class SmsReadinessTest {
         )
         try {
             compose.setContent { MaterialTheme { SettingsScreen(graph, {}, {}, {}) } }
+            compose.onNodeWithText("短信发送与无障碍").performClick()
             val sendTest = "测试求救短信发送"
             compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText(sendTest))
             compose.onNodeWithText(sendTest).performClick()

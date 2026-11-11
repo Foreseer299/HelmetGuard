@@ -184,7 +184,7 @@ class HelmetGuardService : Service() {
         val result = runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-                if (includeLocation && ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                if (includeLocation && graph.location.hasForegroundPermission()) {
                     type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
                 }
                 startForeground(GuardNotifications.MONITORING_ID, notification, type)

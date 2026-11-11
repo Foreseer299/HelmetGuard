@@ -13,6 +13,17 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class RecorderRegressionTest {
+    @Test fun activeSessionDetailIncludesUnflushedSamplesWithoutStopping() = runBlocking<Unit> {
+        val graph = InstrumentationRegistry.getInstrumentation().targetContext.appGraph
+        val id = graph.recorder.start(RecordingLabel.NORMAL_RIDE, "live", RecordingChannels(), "test", false)
+        try {
+            graph.recorder.record(TelemetrySample.STATIC, DetectorSnapshot(), false)
+            assertEquals(1, graph.recorder.loadSamples(id).size)
+            assertEquals(id, graph.recorder.state.value.activeSessionId)
+            assertEquals(1, graph.database.telemetry().session(id)!!.sampleCount)
+        } finally { graph.recorder.stop(); graph.recorder.delete(id) }
+    }
+
     @Test fun sourceSelectionPreventsMixingRealAndSimulatedSamples() = runBlocking<Unit> {
         val graph = InstrumentationRegistry.getInstrumentation().targetContext.appGraph
         val id = graph.recorder.start(RecordingLabel.CRASH_TEST, "test", RecordingChannels(), "模拟", true)

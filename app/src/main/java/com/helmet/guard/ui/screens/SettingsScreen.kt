@@ -30,6 +30,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.key
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -46,8 +47,14 @@ import androidx.compose.ui.unit.dp
 import com.helmet.guard.BuildConfig
 import com.helmet.guard.AppGraph
 import com.helmet.guard.core.sms.SmsConfirmationService
-import com.helmet.guard.ui.components.InfoCard
-import com.helmet.guard.ui.components.SectionTitle
+import com.helmet.guard.ui.components.RefinedGroup as InfoCard
+import com.helmet.guard.ui.components.RefinedHeader
+import com.helmet.guard.ui.components.RefinedSubpageHeader
+import com.helmet.guard.ui.components.RefinedRow
+import com.helmet.guard.ui.components.RefinedNote
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.helmet.guard.ui.components.RefinedSection as SectionTitle
 import com.helmet.guard.ui.components.StatusPill
 import com.helmet.guard.ui.theme.GuardGreen
 import com.helmet.guard.ui.theme.GuardOrange
@@ -76,9 +83,7 @@ fun SettingsScreen(
     val systemRevision = rememberSystemSettingsRevision()
     var permissionRevision by remember { mutableStateOf(0) }
     val subscriptions = remember(systemRevision, permissionRevision) { graph.sms.availableSubscriptions() }
-    var showChecks by remember { mutableStateOf(false) }
-    var showBackground by remember { mutableStateOf(false) }
-    var showStrategy by remember { mutableStateOf(false) }
+    var page by rememberSaveable { mutableStateOf<String?>(null) }
     fun openSystem(intent: Intent) {
         runCatching { context.startActivity(intent) }.onFailure {
             runCatching { context.startActivity(graph.reliability.appDetailsIntent()) }
@@ -136,142 +141,145 @@ fun SettingsScreen(
         }
     }
 
-    LazyColumn(
-        Modifier.statusBarsPadding().padding(horizontal = 18.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+    fun returnToSettings() {
+        if (testDelay > 0) { testJob?.cancel(); testResult = "已取消本次测试。" }
+        page = null
+    }
+    BackHandler(page != null) { returnToSettings() }
+    key(page) { LazyColumn(
+        Modifier.statusBarsPadding().padding(horizontal = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { Spacer(Modifier.height(8.dp)); SectionTitle("设置", "${guide.brand} · ${guide.systemName}") }
-        item {
-            InfoCard {
-                val passed = checks.count { it.passed }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("求救基础设置", fontWeight = FontWeight.Bold)
-                        Text("$passed/${checks.size} 项已就绪", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    StatusPill(if (passed == checks.size) "设置已完成" else "待完善", if (passed == checks.size) GuardGreen else GuardOrange)
-                }
-                TextButton(onClick = { showChecks = !showChecks }) { Text(if (showChecks) "收起权限详情" else "查看权限与待办") }
-                if (showChecks) {
-                checks.forEach { check ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        StatusPill(if (check.passed) "通过" else "待设置", if (check.passed) GuardGreen else GuardOrange)
-                        Spacer(Modifier.padding(5.dp))
-                        Column { Text(check.title, fontWeight = FontWeight.SemiBold); Text(check.detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    }
-                }
-                Button(onClick = { requestPermissions { permissionRevision++ } }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Lock, null); Text(" 授予必要权限") }
-                OutlinedButton(onClick = { openSystem(graph.reliability.notificationSettingsIntent()) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Notifications, null); Text(" 检查通知设置") }
-                OutlinedButton(onClick = {
-                    openSystem(graph.reliability.batteryOptimizationIntent())
-                }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Info, null); Text(" 允许忽略电池优化") }
-                TextButton(onClick = { openSystem(graph.reliability.appDetailsIntent()) }) { Text("后台定位请在权限中选择“始终允许”") }
+        if (page == null) {
+            item { RefinedHeader("设置", "把守护、提醒与日常使用安排好") }
+            item {
+                InfoCard {
+                    RefinedRow("使用前检查", "${checks.count { it.passed }}/${checks.size} 项已设置 · ${guide.systemName}", Icons.Outlined.Lock,
+                        onClick = { page = "permissions" }, trailing = {
+                            StatusPill(if (checks.all { it.passed }) "查看" else "待完善", if (checks.all { it.passed }) GuardGreen else GuardOrange)
+                        })
                 }
             }
-        }
-        item { SectionTitle("${guide.brand} 后台保护", "按下面的指引设置，避免锁屏后守护中断") }
-        item {
-            InfoCard {
-                TextButton(onClick = { showBackground = !showBackground }) { Text(if (showBackground) "收起后台运行指引" else "${guide.brand} · 查看后台运行指引") }
-                if (showBackground) {
-                guide.steps.forEachIndexed { index, step ->
-                    Row { StatusPill("${index + 1}", GuardOrange); Spacer(Modifier.padding(5.dp)); Text(step, modifier = Modifier.weight(1f)) }
-                }
-                Text(guide.caution, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                graph.reliability.launchManufacturerManager()?.let { intent ->
-                    OutlinedButton(onClick = { openSystem(intent) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Phone, null); Text(" 尝试打开系统管家") }
-                }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) { Text("我已完成品牌设置", fontWeight = FontWeight.SemiBold); Text("请在完成以上系统设置后开启", style = MaterialTheme.typography.bodyMedium) }
-                    Switch(oemConfirmed, { scope.launch { graph.preferences.setOemSetupConfirmed(it) } })
+            item { SectionTitle("求救与保护") }
+            item {
+                InfoCard {
+                    RefinedRow("紧急联系人", "${contacts.count { it.enabled }} 位启用 · 求救时接收短信", Icons.Outlined.Call, openContacts)
+                    RefinedRow("短信发送与无障碍", if (smsAssistConnected) "确认辅助已连接 · 发送测试与 SIM 设置" else "系统要求点“发送”时，在这里配置确认辅助", Icons.Outlined.Phone, { page = "sms" })
+                    RefinedRow("求救资料与倒计时", "$riderName · ${countdown} 秒后自动求救", Icons.Outlined.Info, { page = "rescue" })
                 }
             }
-        }
-        item { SectionTitle("求救资料") }
-        item {
-            InfoCard {
-                SettingLink(Icons.Outlined.Call, "紧急联系人", "${contacts.count { it.enabled }} 位已启用", openContacts)
-                SettingLink(Icons.Outlined.Info, "骑手资料", "$riderName ${riderPhone.ifBlank { "" }}") { editRider = true }
-                Text("求救 SIM", fontWeight = FontWeight.SemiBold)
-                if (subscriptions.isEmpty()) Text("未能读取 SIM。请授予电话权限并确认手机已插卡。", color = GuardRed)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    subscriptions.forEach { (id, name) ->
-                        FilterChip(selectedSim == id, { scope.launch { graph.preferences.setSmsSubscriptionId(id) } }, label = { Text(name) })
+            item { SectionTitle("日常使用") }
+            item {
+                InfoCard {
+                    RefinedRow("通讯与语音", "短信、来电、接单提醒与离线音色", Icons.Outlined.Notifications, openAnnouncements)
+                    RefinedRow("权限与后台运行", "检查授权，减少锁屏后服务中断", Icons.Outlined.Lock, { page = "permissions" })
+                }
+            }
+            item { RefinedNote("HelmetGuard ${BuildConfig.VERSION_NAME} · 每一次出发，都有回应") }
+        } else {
+            item { RefinedSubpageHeader(
+                when (page) { "sms" -> "短信发送与无障碍"; "rescue" -> "求救资料与倒计时"; else -> "权限与后台运行" },
+                when (page) { "sms" -> "先授权，再验证这台手机能否自动发送"; "rescue" -> "让联系人知道是谁需要帮助"; else -> "返回本页后会重新检查系统状态" },
+                ::returnToSettings
+            ) }
+            if (page == "permissions") {
+                item {
+                    InfoCard {
+                        Text("应用权限", style = MaterialTheme.typography.titleMedium)
+                        Button(onClick = { requestPermissions { permissionRevision++ } }, modifier = Modifier.fillMaxWidth()) { Text("检查并申请必要权限") }
+                        RefinedRow("打开系统应用设置", "如果曾选择“不再询问”，请在系统内手动允许。", Icons.Outlined.Lock, { openSystem(graph.reliability.appDetailsIntent()) })
+                        RefinedRow("通知设置", "允许事故通知，才能及时处理误报。", Icons.Outlined.Notifications, { openSystem(graph.reliability.notificationSettingsIntent()) })
                     }
                 }
-                Text("双卡手机必须明确选择。应用将使用所选 SIM 发送，并记录短信提交和送达回执。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        item { SectionTitle("求救短信实测", "骑行前检查这台手机是否能自动发出短信") }
-        item {
-            InfoCard {
-                Text(when (guide.brand) {
-                    "华为" -> "先亮屏发送测试短信。若出现风险提示，请手动选“始终允许”并完成验证。随后用延时测试检查锁屏发送。"
-                    "OPPO / 一加 / realme" -> "先检查应用权限中的短信设置。若仍弹出带倒计时的“将发短信”，可开启确认辅助后再测试。"
-                    else -> "先亮屏发送测试短信，按本机提示授权，再用延时测试检查锁屏发送。"
-                })
-                OutlinedButton(
-                    onClick = { openSystem(graph.reliability.appDetailsIntent()) },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("打开 HelmetGuard 系统权限") }
-                Button(
-                    onClick = { showSmsTest = true },
-                    enabled = testContact != null && !testRunning,
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("测试求救短信发送") }
-                if (testContact == null) Text("请先启用一位号码完整的紧急联系人。")
-                Text("求救短信确认辅助 · ${if (smsAssistConnected) "已连接" else "未开启或未连接"}")
-                OutlinedButton(
-                    onClick = { showSmsAssistConsent = true },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("管理短信确认辅助") }
-                if (testDelay > 0) {
-                    Text("${testDelay} 秒后提交测试短信，现在可以锁屏。")
-                    TextButton(onClick = {
-                        if (testDelay > 0) {
-                            testJob?.cancel()
-                            testResult = "已取消本次测试。"
+                item { SectionTitle("检查结果", "设置完成不等于短信已送达，请另做发送实测。") }
+                items(checks.size) { index ->
+                    val check = checks[index]
+                    InfoCard {
+                        RefinedRow(check.title, check.detail, trailing = {
+                            Text(if (check.passed) "已设置" else "待设置", color = if (check.passed) GuardGreen else GuardOrange, style = MaterialTheme.typography.labelMedium)
+                        })
+                    }
+                }
+                item { SectionTitle("${guide.brand} 后台运行") }
+                item {
+                    InfoCard {
+                        guide.steps.forEachIndexed { index, step -> Text("${index + 1}. $step", style = MaterialTheme.typography.bodyMedium) }
+                        RefinedNote(guide.caution)
+                        OutlinedButton(onClick = { openSystem(graph.reliability.batteryOptimizationIntent()) }, modifier = Modifier.fillMaxWidth()) { Text("检查电池优化") }
+                        graph.reliability.launchManufacturerManager()?.let { intent ->
+                            TextButton(onClick = { openSystem(intent) }) { Text("打开系统后台管理") }
                         }
-                    }) { Text("取消测试") }
-                } else if (testRunning) {
-                    Text("等待系统提交回执。如有弹窗，请查看系统提示。")
-                }
-                testResult?.let { Text(it) }
-                Text("保持锁屏且无需手动点击，收件人收到后才算本次测试通过。", style = MaterialTheme.typography.bodyMedium)
-            }
-        }
-        item { SectionTitle("骑行播报") }
-        item {
-            InfoCard {
-                SettingLink(
-                    Icons.Outlined.Notifications,
-                    "通知与头盔语音",
-                    "来源、内容程度、TTS音色、音量与诊断",
-                    openAnnouncements
-                )
-                Text("普通通知不会占用事故优先级；验证码、地址和敏感信息默认隐藏。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        item { SectionTitle("事故策略") }
-        item {
-            InfoCard {
-                TextButton(onClick = { showStrategy = !showStrategy }) { Text(if (showStrategy) "收起事故策略" else "自动求救倒计时：${countdown} 秒 · 调整") }
-                if (showStrategy) {
-                Text("自动求救倒计时：${localCountdown.toInt()} 秒", fontWeight = FontWeight.SemiBold)
-                Slider(localCountdown, { localCountdown = it }, valueRange = 5f..30f, steps = 24, onValueChangeFinished = { scope.launch { graph.preferences.setCountdownSeconds(localCountdown.toInt()) } })
-                Text("检测器会结合冲击、旋转、姿态变化、自由落体、碰撞前运动和碰撞后静止进行判断。单个 MPU6050 无法保证零误报，正式硬件建议增加佩戴传感器。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        RefinedRow("已完成后台设置", "仅在按上方指引设置后开启。", trailing = {
+                            Switch(oemConfirmed, { scope.launch { graph.preferences.setOemSetupConfirmed(it) } })
+                        })
+                        RefinedNote("后台定位需在系统应用权限中选择“始终允许”。不同系统菜单可能略有区别。")
+                    }
                 }
             }
-        }
-        item {
-            InfoCard {
-                Text("HelmetGuard ${BuildConfig.VERSION_NAME}", fontWeight = FontWeight.Bold)
-                Text("面向 ESP32-S3 + MPU6050 与 Android 手机。无需 Google Play 服务。", style = MaterialTheme.typography.bodyMedium)
-                Text("紧急情况下请优先拨打 120 / 110。本产品不能替代专业救援设备。", color = GuardRed, fontWeight = FontWeight.SemiBold)
+            if (page == "rescue") {
+                item {
+                    InfoCard {
+                        RefinedRow("紧急联系人", "${contacts.count { it.enabled }} 位启用 · 管理接收求救信息的人", Icons.Outlined.Call, openContacts)
+                        RefinedRow("我的求救资料", "$riderName · ${riderPhone.ifBlank { "尚未填写回拨电话" }}", Icons.Outlined.Info, { editRider = true })
+                    }
+                }
+                item { SectionTitle("误报取消时间") }
+                item {
+                    InfoCard {
+                        Text("自动求救倒计时：${localCountdown.toInt()} 秒", style = MaterialTheme.typography.titleMedium)
+                        Slider(localCountdown, { localCountdown = it }, valueRange = 5f..30f, steps = 24,
+                            onValueChangeFinished = { scope.launch { graph.preferences.setCountdownSeconds(localCountdown.toInt()) } })
+                        RefinedNote("检测到事故后，先给你这段时间确认安全。未取消时才会获取位置并提交求救短信。")
+                    }
+                }
+                item { RefinedNote("建议骑行前完成一次模拟演练，熟悉取消和立即求救操作。") }
             }
-            Spacer(Modifier.height(24.dp))
+            if (page == "sms") {
+                item {
+                    InfoCard {
+                        Text("短信确认辅助", style = MaterialTheme.typography.titleMedium)
+                        StatusPill(if (smsAssistConnected) "辅助已连接" else "辅助未连接", if (smsAssistConnected) GuardGreen else GuardOrange)
+                        RefinedNote("如果系统每次发短信都要求点“发送”，可启用此无障碍服务。它只协助确认本应用发起的求救短信，不代替系统授权或身份验证。")
+                        Button(onClick = { showSmsAssistConsent = true }, modifier = Modifier.fillMaxWidth()) { Text("管理短信确认辅助") }
+                        RefinedNote("在系统“无障碍”的已安装服务中，找到“HelmetGuard 求救短信确认辅助”并开启。")
+                    }
+                }
+                item { SectionTitle("选择发送 SIM") }
+                item {
+                    InfoCard {
+                        if (subscriptions.isEmpty()) {
+                            RefinedNote("未读取到 SIM，请检查电话权限和插卡状态。")
+                            OutlinedButton(onClick = { requestPermissions { permissionRevision++ } }, modifier = Modifier.fillMaxWidth()) { Text("检查电话与短信权限") }
+                        }
+                        subscriptions.forEach { (id, name) ->
+                            RefinedRow(name, if (selectedSim == id || selectedSim < 0 && subscriptions.size == 1) "当前求救 SIM" else "点击使用这张卡", onClick = { scope.launch { graph.preferences.setSmsSubscriptionId(id) } }, trailing = {
+                                androidx.compose.material3.RadioButton(selectedSim == id || selectedSim < 0 && subscriptions.size == 1,
+                                    onClick = { scope.launch { graph.preferences.setSmsSubscriptionId(id) } })
+                            })
+                        }
+                        RefinedNote("双卡手机需明确选择。拔出所选 SIM 后请重新设置，不会自动换另一张卡发送。")
+                    }
+                }
+                item { SectionTitle("发送前实测", "测试短信会注明“无需救援”，可能产生普通短信费用。") }
+                item {
+                    InfoCard {
+                        RefinedNote("先亮屏测试并完成系统授权，再用延时测试检查锁屏发送。若系统提供“始终允许”，请自行选择并完成验证。")
+                        if (testContact == null) RefinedRow("先添加紧急联系人", "启用一位号码完整的联系人后即可测试。", Icons.Outlined.Call, openContacts)
+                        Button(onClick = { showSmsTest = true }, enabled = testContact != null && !testRunning, modifier = Modifier.fillMaxWidth()) { Text("测试求救短信发送") }
+                        TextButton(onClick = { openSystem(graph.reliability.appDetailsIntent()) }) { Text("打开 HelmetGuard 系统权限") }
+                        if (testDelay > 0) {
+                            Text("${testDelay} 秒后提交测试短信，现在可以锁屏。")
+                            TextButton(onClick = { if (testDelay > 0) { testJob?.cancel(); testResult = "已取消本次测试。" } }) { Text("取消测试") }
+                        } else if (testRunning) Text("等待系统提交回执。如有弹窗，请查看系统提示。")
+                        testResult?.let { Text(it) }
+                        RefinedNote("保持锁屏且无需手动点击，收件人收到后才算本次测试通过。")
+                    }
+                }
+            }
         }
+        item { Spacer(Modifier.height(24.dp)) }
+    }
+
     }
 
     if (showSmsAssistConsent) {
@@ -321,7 +329,7 @@ fun SettingsScreen(
         var phone by remember { mutableStateOf(riderPhone) }
         AlertDialog(
             onDismissRequest = { editRider = false },
-            title = { Text("骑手资料") },
+            title = { Text("我的求救资料") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(name, { name = it.take(20) }, label = { Text("姓名/称呼") }, modifier = Modifier.fillMaxWidth())
@@ -331,15 +339,5 @@ fun SettingsScreen(
             confirmButton = { Button(onClick = { scope.launch { graph.preferences.setRider(name, phone) }; editRider = false }) { Text("保存") } },
             dismissButton = { TextButton(onClick = { editRider = false }) { Text("取消") } }
         )
-    }
-}
-
-@Composable
-private fun SettingLink(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, detail: String, onClick: () -> Unit) {
-    OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-        Icon(icon, null)
-        Spacer(Modifier.padding(5.dp))
-        Column(Modifier.weight(1f), horizontalAlignment = Alignment.Start) { Text(title, fontWeight = FontWeight.SemiBold); Text(detail, style = MaterialTheme.typography.bodyMedium) }
-        Icon(Icons.Outlined.KeyboardArrowRight, null)
     }
 }

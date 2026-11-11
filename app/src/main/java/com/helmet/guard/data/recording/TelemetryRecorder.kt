@@ -144,12 +144,15 @@ class TelemetryRecorder(
         }
     }
 
-    suspend fun delete(sessionId: Long) {
-        if (_state.value.activeSessionId == sessionId) stop()
+    suspend fun delete(sessionId: Long) = mutex.withLock {
+        if (_state.value.activeSessionId == sessionId) stopLocked()
         dao.deleteSession(sessionId)
     }
 
-    suspend fun loadSamples(sessionId: Long): List<TelemetrySampleEntity> = dao.samples(sessionId)
+    suspend fun loadSamples(sessionId: Long): List<TelemetrySampleEntity> = mutex.withLock {
+        if (_state.value.activeSessionId == sessionId) flushLocked()
+        dao.samples(sessionId)
+    }
 
     suspend fun createCsvShareIntent(sessionId: Long): Intent? = withContext(Dispatchers.IO) {
         flush()
